@@ -216,7 +216,7 @@ func (m *Menu) ProcessHotkeys() {
 	// Close if ActionShouldClose is pressed, but display a confirmation dialog
 	// in case a game is running
 	if input.Pressed[0][input.ActionShouldClose] == 1 {
-		askQuitConfirmation(func() {
+		AskForPayment(func() {
 			m.SetShouldClose(true)
 		})
 	}

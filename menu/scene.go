@@ -237,6 +237,25 @@ func askQuitConfirmation(cb func()) {
 	}
 }
 
+// Displays a confirmation dialog before quitting
+func AskForPayment(cb func()) {
+	if state.CoreRunning {
+		if !state.MenuActive {
+			state.MenuActive = true
+		}
+		menu.Push(buildYesNoDialog(
+			"Your time is out!",
+			"Please pay to continue playing.",
+			"Do you want to resume the game?",
+			func() {
+				state.MenuActive = false // Resume the game.
+				cb() // Call the callback to resume or close.
+			}))
+	} else {
+		cb()
+	}
+}
+
 // Displays a confirmation dialog before deleting a playlist game entry
 func askDeleteGameConfirmation(cb func()) {
 	menu.Push(buildYesNoDialog(

@@ -32,7 +32,7 @@ func buildTabs() Scene {
 	list.label = "Ludo"
 
 	list.children = append(list.children, entry{
-		label:    "Main Menu",
+		label:    "Spets",
 		subLabel: "Load cores and games manually",
 		icon:     "main",
 		callbackOK: func() {
@@ -282,9 +282,13 @@ func (tabs *sceneTabs) update(dt float32) {
 }
 
 func (tabs sceneTabs) render() {
-	_, h := menu.GetFramebufferSize()
+    w, h := menu.GetFramebufferSize()
+    topLabel := "Spetsium"
+    lw := menu.Font.Width(1.0*menu.ratio, topLabel)
+    menu.Font.SetColor(white)
+    menu.Font.Printf(float32(w)/2 - lw/2, 115*menu.ratio, 1.0*menu.ratio, topLabel)
 
-	stackWidth := 710 * menu.ratio
+    stackWidth := 710 * menu.ratio
 	for i, e := range tabs.children {
 
 		cf := colorful.Hcl(float64(i)*20, 0.5, 0.5)
