@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/go-gl/glfw/v3.3/glfw"
@@ -27,6 +28,45 @@ func init() {
 }
 
 var frame = 0
+
+// timerOverlay holds the remaining time and a mutex for thread safety.
+type timerOverlay struct {
+	remaining int
+	mu        sync.RWMutex
+	visible   bool
+}
+
+var globalTimerOverlay = &timerOverlay{}
+
+// drawTimerOverlay draws the timer in the top-right corner, small, always visible, transparent background.
+func drawTimerOverlay(vid *video.Video) {
+	globalTimerOverlay.mu.RLock()
+	remaining := globalTimerOverlay.remaining
+	visible := globalTimerOverlay.visible
+	globalTimerOverlay.mu.RUnlock()
+
+	if !visible || remaining < 0 {
+		return
+	}
+
+	w, _ := vid.GetFramebufferSize()
+	ratio := float32(w) / 1920
+	padding := 32 * ratio
+	bgW := 120 * ratio // much smaller width
+	bgH := 36 * ratio  // much smaller height
+	x := float32(w) - bgW - padding
+	y := padding
+
+	// Transparent background
+	vid.DrawRect(x, y, bgW, bgH, 6*ratio, video.Color{R: 0, G: 0, B: 0, A: 0.45})
+
+	// Timer text (red, much smaller)
+	mins := remaining / 60
+	secs := remaining % 60
+	timerStr := fmt.Sprintf("%02d:%02d", mins, secs)
+	vid.Font.SetColor(video.Color{R: 1, G: 0, B: 0, A: 1})
+	vid.Font.Printf(x+18*ratio, y+7*ratio, 0.32*ratio, timerStr)
+}
 
 func runLoop(vid *video.Video, m *menu.Menu) {
 	var currTime time.Time
@@ -58,11 +98,15 @@ func runLoop(vid *video.Video, m *menu.Menu) {
 			frame++
 			if frame%600 == 0 {
 				savefiles.SaveSRAM()
-			}
+				}
+			// Draw timer overlay on top of game
+			drawTimerOverlay(vid)
 		} else {
 			m.Update(dt)
 			vid.Render()
 			m.Render(dt)
+			// Draw timer overlay on top of menu
+			drawTimerOverlay(vid)
 		}
 
 		// Always draw notifications on top
@@ -78,8 +122,8 @@ func runLoop(vid *video.Video, m *menu.Menu) {
 	}
 }
 
-// RunGame launches the given core+game and shows a "TIME LEFT: mm:ss" notification
-// on top of the Ludo window. When countdown hits zero, window is paused automatically.
+// RunGame launches the given core+game and shows a "TIME LEFT: mm:ss" overlay
+// in the top-right corner of the Ludo window. When countdown hits zero, window is paused automatically.
 func RunGame(corePath, gamePath string, durationSeconds int, timerChan chan int, resumeChan chan bool) error {
 	// Load settings, init, etc.
 	err := settings.Load()
@@ -126,6 +170,12 @@ func RunGame(corePath, gamePath string, durationSeconds int, timerChan chan int,
 	state.MenuActive = false
 	state.CoreRunning = true
 
+	// Initialize timer overlay
+	globalTimerOverlay.mu.Lock()
+	globalTimerOverlay.remaining = durationSeconds
+	globalTimerOverlay.visible = true
+	globalTimerOverlay.mu.Unlock()
+
 	// Timer management goroutine
 	go func() {
 		remaining := durationSeconds
@@ -133,14 +183,22 @@ func RunGame(corePath, gamePath string, durationSeconds int, timerChan chan int,
 			if remaining <= 0 {
 				// Pause the game and notify the Fyne UI
 				state.MenuActive = true
+				globalTimerOverlay.mu.Lock()
+				globalTimerOverlay.remaining = 0
+				globalTimerOverlay.mu.Unlock()
 				timerChan <- -1 // Signal timeout to Fyne UI
-				
+
 				// Wait for resume signal and new duration
 				<-resumeChan     // Wait for resume signal
 				newDuration := <-timerChan // Get new timer duration
 				remaining = newDuration
 				state.MenuActive = false // Resume the game
-				
+
+				// Update overlay
+				globalTimerOverlay.mu.Lock()
+				globalTimerOverlay.remaining = remaining
+				globalTimerOverlay.mu.Unlock()
+
 				// Bring the Ludo window to the foreground
 				vid.Window.Show()
 				vid.Window.Focus()
@@ -149,12 +207,15 @@ func RunGame(corePath, gamePath string, durationSeconds int, timerChan chan int,
 				case newDuration := <-timerChan:
 					if newDuration > 0 {
 						remaining = newDuration
+						globalTimerOverlay.mu.Lock()
+						globalTimerOverlay.remaining = remaining
+						globalTimerOverlay.mu.Unlock()
 					}
 				case <-time.After(time.Second):
-					mins := remaining / 60
-					secs := remaining % 60
-					ntf.Display(ntf.Info, fmt.Sprintf("TIME LEFT: %02d:%02d", mins, secs), 1.0)
 					remaining--
+					globalTimerOverlay.mu.Lock()
+					globalTimerOverlay.remaining = remaining
+					globalTimerOverlay.mu.Unlock()
 				}
 			}
 		}

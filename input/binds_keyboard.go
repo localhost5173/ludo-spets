@@ -6,7 +6,7 @@ import (
 )
 
 var keyBinds = map[glfw.Key]uint32{
-	glfw.KeyX:          libretro.DeviceIDJoypadA,
+	glfw.KeyX:          libretro.DeviceIDJoypadA, // Restore X for gameplay
 	glfw.KeyZ:          libretro.DeviceIDJoypadB,
 	glfw.KeyA:          libretro.DeviceIDJoypadY,
 	glfw.KeyS:          libretro.DeviceIDJoypadX,
@@ -19,7 +19,7 @@ var keyBinds = map[glfw.Key]uint32{
 	glfw.KeyEnter:      libretro.DeviceIDJoypadStart,
 	glfw.KeyRightShift: libretro.DeviceIDJoypadSelect,
 	glfw.KeySpace:      ActionFastForwardToggle,
-	glfw.KeyP:          ActionMenuToggle,
+	glfw.KeyP:          ActionMenuToggle, // Change P to menu toggle instead of payment
 	glfw.KeyF:          ActionFullscreenToggle,
 	glfw.KeyEscape:     ActionShouldClose,
 }

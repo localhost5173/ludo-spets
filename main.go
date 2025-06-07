@@ -100,7 +100,7 @@ func main() {
 	priceLabel.TextSize = 18
 	priceLabel.Alignment = fyne.TextAlignCenter
 
-	paymentPrompt := canvas.NewText("PRESS 'X' TO INSERT COIN", color.NRGBA{R: 0xff, G: 0xff, B: 0x00, A: 0xff})
+	paymentPrompt := canvas.NewText("PRESS 'P' TO INSERT COIN", color.NRGBA{R: 0xff, G: 0xff, B: 0x00, A: 0xff})
 	paymentPrompt.TextSize = 24
 	paymentPrompt.Alignment = fyne.TextAlignCenter
 
@@ -158,7 +158,7 @@ func main() {
 
 					w.Show()
 					w.RequestFocus()
-					status.Text = "TIME OUT! SELECT TIME THEN PRESS X TO PAY"
+					status.Text = "TIME OUT! SELECT TIME THEN PRESS P TO PAY"
 					status.Refresh()
 					timeSlider.Show()
 					priceLabel.Show()
@@ -222,7 +222,7 @@ func main() {
 				state = statePayment
 				stateMutex.Unlock()
 
-				status.Text = "PRESS X TO PAY"
+				status.Text = "PRESS P TO PAY"
 				status.Refresh()
 				timeSlider.Hide()
 				priceLabel.Hide()
@@ -231,8 +231,8 @@ func main() {
 
 		// ─── State 2: PAYMENT ───
 		case statePayment:
-			if key.Name == fyne.KeyX {
-				fmt.Println("X key pressed - starting game launch")
+			if key.Name == fyne.KeyP {
+				fmt.Println("P key pressed - starting game launch")
 				status.Text = "LAUNCHING GAME..."
 				status.Refresh()
 
@@ -274,7 +274,7 @@ func main() {
 					timeSlider.SetValue(timeSlider.Value - 1)
 					updatePrice()
 				}
-			case fyne.KeyX:
+			case fyne.KeyP:
 				status.Text = "RESUMING GAME..."
 				status.Refresh()
 
