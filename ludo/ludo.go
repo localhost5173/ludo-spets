@@ -181,12 +181,18 @@ func RunGame(corePath, gamePath string, durationSeconds int, timerChan chan int,
 		remaining := durationSeconds
 		for {
 			if remaining <= 0 {
-				// Pause the game and notify the Fyne UI
-				state.MenuActive = true
+				time.Sleep(1000 * time.Millisecond) // Give some time for the UI to update
+				 // Signal timeout to Fyne UI first (so window appears)
 				globalTimerOverlay.mu.Lock()
 				globalTimerOverlay.remaining = 0
 				globalTimerOverlay.mu.Unlock()
 				timerChan <- -1 // Signal timeout to Fyne UI
+				
+				// Wait 2 seconds before actually pausing the game
+				time.Sleep(2000 * time.Millisecond)
+				
+				// Now pause the game
+				state.MenuActive = true
 
 				// Wait for resume signal and new duration
 				<-resumeChan     // Wait for resume signal
