@@ -232,6 +232,7 @@ func main() {
 		// ─── State 2: PAYMENT ───
 		case statePayment:
 			if key.Name == fyne.KeyX {
+				fmt.Println("X key pressed - starting game launch")
 				status.Text = "LAUNCHING GAME..."
 				status.Refresh()
 
@@ -240,7 +241,9 @@ func main() {
 				corePath := cores[gameName]
 				gamePath := games[gameName]
 				mins := int(timeSlider.Value)
-				durationSecs := mins * 60
+				durationSecs := mins * 2
+
+				fmt.Printf("Launching: %s with core: %s for %d seconds\n", gamePath, corePath, durationSecs)
 
 				// Hide Fyne window and launch Ludo
 				w.Hide()
@@ -250,7 +253,11 @@ func main() {
 				go func() {
 					runtime.LockOSThread()
 					defer runtime.UnlockOSThread()
-					_ = ludo.RunGame(corePath, gamePath, durationSecs, timerChan, resumeChan)
+					fmt.Println("About to call ludo.RunGame")
+					err := ludo.RunGame(corePath, gamePath, durationSecs, timerChan, resumeChan)
+					if err != nil {
+						fmt.Printf("Error running game: %v\n", err)
+					}
 				}()
 			}
 
@@ -282,7 +289,7 @@ func main() {
 				// Send resume signal and timer duration in separate goroutine
 				go func() {
 					resumeChan <- true
-					timerChan <- mins * 60
+					timerChan <- mins * 2
 				}()
 			}
 		}
