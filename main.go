@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image/color"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/libretro/ludo/ludo"
@@ -103,8 +104,20 @@ func main() {
 	paymentPrompt.TextSize = 24
 	paymentPrompt.Alignment = fyne.TextAlignCenter
 
-	// State machine: 0=select game, 1=time select, 2=payment
-	state := 0
+	// Channels for communication between Fyne UI and game logic
+	timerChan := make(chan int, 10)
+	resumeChan := make(chan bool, 10)
+
+	var stateMutex sync.Mutex
+
+	// State machine: 0=select game, 1=time select, 2=payment, 3=extend time
+	const (
+		stateSelectGame = 0
+		stateTimeSelect = 1
+		statePayment    = 2
+		stateExtendTime = 3
+	)
+	state := stateSelectGame
 
 	const pricePerMinute = 0.5
 	updatePrice := func() {
@@ -130,91 +143,149 @@ func main() {
 
 	w.SetContent(content)
 
+	// Monitor timer events using a ticker
+	ticker := time.NewTicker(100 * time.Millisecond)
+	go func() {
+		defer ticker.Stop()
+		for range ticker.C {
+			select {
+			case signal := <-timerChan:
+				if signal == -1 {
+					// Timer expired, show window on main thread
+					stateMutex.Lock()
+					state = stateExtendTime
+					stateMutex.Unlock()
+
+					w.Show()
+					w.RequestFocus()
+					status.Text = "TIME OUT! SELECT TIME THEN PRESS X TO PAY"
+					status.Refresh()
+					timeSlider.Show()
+					priceLabel.Show()
+					paymentPrompt.Show()
+				}
+			default:
+				// No signal, continue
+			}
+		}
+	}()
+
 	// ===========================
 	// 3) Handle key events
 	// ===========================
 	w.Canvas().SetOnTypedKey(func(key *fyne.KeyEvent) {
-		switch state {
-			// ─── State 0: SELECT GAME ───
-			case 0:
-				switch key.Name {
-				case fyne.KeyDown:
-					if selectedIdx < len(keys)-1 {
-						selectedIdx++
-						list.Select(selectedIdx)
-					}
-				case fyne.KeyUp:
-					if selectedIdx > 0 {
-						selectedIdx--
-						list.Select(selectedIdx)
-					}
-				case fyne.KeyReturn, fyne.KeyEnter:
-					state = 1
-					status.Text = "SELECT TIME THEN ENTER"
-					status.Refresh()
-					list.Hide()
-					timeSlider.Show()
-					priceLabel.Show()
+		stateMutex.Lock()
+		currentState := state
+		stateMutex.Unlock()
+
+		switch currentState {
+		// ─── State 0: SELECT GAME ───
+		case stateSelectGame:
+			switch key.Name {
+			case fyne.KeyDown:
+				if selectedIdx < len(keys)-1 {
+					selectedIdx++
+					list.Select(selectedIdx)
 				}
-
-			// ─── State 1: TIME SELECT ───
-			case 1:
-				switch key.Name {
-				case fyne.KeyRight:
-					if timeSlider.Value < timeSlider.Max {
-						timeSlider.SetValue(timeSlider.Value + 1)
-						updatePrice()
-					}
-				case fyne.KeyLeft:
-					if timeSlider.Value > timeSlider.Min {
-						timeSlider.SetValue(timeSlider.Value - 1)
-						updatePrice()
-					}
-				case fyne.KeyReturn, fyne.KeyEnter:
-					state = 2
-					status.Text = "PRESS X TO PAY"
-					status.Refresh()
-					timeSlider.Hide()
-					priceLabel.Hide()
-					paymentPrompt.Show()
+			case fyne.KeyUp:
+				if selectedIdx > 0 {
+					selectedIdx--
+					list.Select(selectedIdx)
 				}
+			case fyne.KeyReturn, fyne.KeyEnter:
+				stateMutex.Lock()
+				state = stateTimeSelect
+				stateMutex.Unlock()
 
-			// ─── State 2: PAYMENT ───
-			case 2:
-				if key.Name == fyne.KeyX {
-					status.Text = "LAUNCHING GAME..."
-					status.Refresh()
-
-					// Pull out the chosen game & core
-					gameName := keys[selectedIdx]
-					corePath := cores[gameName]
-					gamePath := games[gameName]
-					mins := int(timeSlider.Value)
-					durationSecs := mins * 2
-
-					// Launch Ludo in its own goroutine, locked to OS thread
-					go func() {
-						runtime.LockOSThread()
-						defer runtime.UnlockOSThread()
-						// This will block until the game window closes (timer hits 0 or user quits).
-						_ = ludo.RunGame(corePath, gamePath, durationSecs)
-					}()
-
-					// As soon as RunGameWithTimer returns, we reset the UI:
-					go func() {
-						// Poll until Ludo’s window is gone
-						// (Alternatively, could return a channel or error, but blocking is fine.)
-						time.Sleep(time.Duration(durationSecs)*time.Second + time.Second)
-						// Reset UI:
-						state = 0
-						status.Text = "◄ ► SELECT GAME    ENTER TO CONTINUE"
-						status.Refresh()
-						list.Show()
-						paymentPrompt.Hide()
-					}()
-				}
+				status.Text = "SELECT TIME THEN ENTER"
+				status.Refresh()
+				list.Hide()
+				timeSlider.Show()
+				priceLabel.Show()
 			}
-		})
 
+		// ─── State 1: TIME SELECT ───
+		case stateTimeSelect:
+			switch key.Name {
+			case fyne.KeyRight:
+				if timeSlider.Value < timeSlider.Max {
+					timeSlider.SetValue(timeSlider.Value + 1)
+					updatePrice()
+				}
+			case fyne.KeyLeft:
+				if timeSlider.Value > timeSlider.Min {
+					timeSlider.SetValue(timeSlider.Value - 1)
+					updatePrice()
+				}
+			case fyne.KeyReturn, fyne.KeyEnter:
+				stateMutex.Lock()
+				state = statePayment
+				stateMutex.Unlock()
+
+				status.Text = "PRESS X TO PAY"
+				status.Refresh()
+				timeSlider.Hide()
+				priceLabel.Hide()
+				paymentPrompt.Show()
+			}
+
+		// ─── State 2: PAYMENT ───
+		case statePayment:
+			if key.Name == fyne.KeyX {
+				status.Text = "LAUNCHING GAME..."
+				status.Refresh()
+
+				// Pull out the chosen game & core
+				gameName := keys[selectedIdx]
+				corePath := cores[gameName]
+				gamePath := games[gameName]
+				mins := int(timeSlider.Value)
+				durationSecs := mins * 60
+
+				// Hide Fyne window and launch Ludo
+				w.Hide()
+				paymentPrompt.Hide()
+
+				// Launch Ludo in its own goroutine, locked to OS thread
+				go func() {
+					runtime.LockOSThread()
+					defer runtime.UnlockOSThread()
+					_ = ludo.RunGame(corePath, gamePath, durationSecs, timerChan, resumeChan)
+				}()
+			}
+
+		// ─── State 3: EXTEND TIME ───
+		case stateExtendTime:
+			switch key.Name {
+			case fyne.KeyRight:
+				if timeSlider.Value < timeSlider.Max {
+					timeSlider.SetValue(timeSlider.Value + 1)
+					updatePrice()
+				}
+			case fyne.KeyLeft:
+				if timeSlider.Value > timeSlider.Min {
+					timeSlider.SetValue(timeSlider.Value - 1)
+					updatePrice()
+				}
+			case fyne.KeyX:
+				status.Text = "RESUMING GAME..."
+				status.Refresh()
+
+				mins := int(timeSlider.Value)
+
+				// Hide Fyne window and UI elements
+				timeSlider.Hide()
+				priceLabel.Hide()
+				paymentPrompt.Hide()
+				w.Hide()
+
+				// Send resume signal and timer duration in separate goroutine
+				go func() {
+					resumeChan <- true
+					timerChan <- mins * 60
+				}()
+			}
+		}
+	})
 	w.ShowAndRun()
 }
