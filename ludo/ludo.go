@@ -184,6 +184,17 @@ func RunGame(corePath, gamePath string, durationSeconds int, timerChan chan int,
 	globalTimerOverlay.visible = true
 	globalTimerOverlay.mu.Unlock()
 
+	// Wait a moment for everything to initialize properly
+	time.Sleep(200 * time.Millisecond)
+	
+	// Force window to front and ensure it's visible
+	vid.Window.Show()
+	vid.Window.Focus()
+	
+	// Signal that the game is loaded and ready
+	log.Println("Game fully loaded, sending confirmation signal")
+	timerChan <- -999 // Special signal for game loaded
+
 	// Create a done channel to signal when timer goroutine should exit
 	doneChan := make(chan struct{})
 	
@@ -192,6 +203,7 @@ func RunGame(corePath, gamePath string, durationSeconds int, timerChan chan int,
 		remaining := durationSeconds
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
+		prepareTimeoutSent := false
 		
 		for {
 			select {
@@ -205,6 +217,13 @@ func RunGame(corePath, gamePath string, durationSeconds int, timerChan chan int,
 				globalTimerOverlay.remaining = remaining
 				globalTimerOverlay.mu.Unlock()
 				
+				// Send prepare timeout signal 10 seconds before actual timeout
+				if remaining == 10 && !prepareTimeoutSent {
+					log.Println("Sending prepare timeout signal (10 seconds remaining)")
+					timerChan <- -2 // -2 is the prepare timeout signal
+					prepareTimeoutSent = true
+				}
+				
 				if remaining <= 0 {
 					 // When time runs out, send game window information along with timeout signal
 					// This will allow the web UI to position itself over the game window
@@ -213,6 +232,8 @@ func RunGame(corePath, gamePath string, durationSeconds int, timerChan chan int,
 					var xpos, ypos, width, height int
 					xpos, ypos = vid.Window.GetPos()
 					width, height = vid.Window.GetSize()
+					
+					log.Printf("Game timeout! Pausing game at window position: %d,%d %dx%d", xpos, ypos, width, height)
 					
 					// Signal timeout to UI with window information
 					timerChan <- -1 // -1 is the timeout signal
@@ -226,13 +247,18 @@ func RunGame(corePath, gamePath string, durationSeconds int, timerChan chan int,
 					
 					// Pause the game but keep window visible
 					state.MenuActive = true
+					log.Println("Game paused, waiting for resume signal...")
 					
 					// Wait for resume signal
-					<-resumeChan
+					resumeReceived := <-resumeChan
+					log.Printf("Resume signal received: %v", resumeReceived)
 					
 					// Get new duration
 					newDuration := <-timerChan
+					log.Printf("New timer duration received: %d seconds", newDuration)
+					
 					remaining = newDuration
+					prepareTimeoutSent = false // Reset for next cycle
 					
 					// Update overlay
 					globalTimerOverlay.mu.Lock()
@@ -240,13 +266,21 @@ func RunGame(corePath, gamePath string, durationSeconds int, timerChan chan int,
 					globalTimerOverlay.mu.Unlock()
 					
 					// Resume game and ensure focus
+					log.Println("Resuming game...")
 					state.MenuActive = false
+					
+					// Force window focus
+					vid.Window.Show()
 					vid.Window.Focus()
+					
+					log.Printf("Game resumed with %d seconds remaining", remaining)
 				}
 				
 			case newDuration := <-timerChan:
+				// Handle additional time being added (not during timeout)
 				if newDuration > 0 {
-					remaining = newDuration
+					log.Printf("Timer updated: adding %d seconds", newDuration)
+					remaining += newDuration  // Add to existing time instead of replacing
 					globalTimerOverlay.mu.Lock()
 					globalTimerOverlay.remaining = remaining
 					globalTimerOverlay.mu.Unlock()

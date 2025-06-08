@@ -4,7 +4,8 @@ const STATE = {
   TIME_SELECT: 1,
   PAYMENT: 2,
   EXTEND_TIME: 3,
-  EXTEND_PAYMENT: 4, // Add new state for payment confirmation after timeout
+  EXTEND_PAYMENT: 4,
+  GAME_LOADING: 5, // Add new loading state
 };
 
 // Application state
@@ -77,9 +78,28 @@ function handleWebSocketMessage(message) {
       positionOverGame(message.payload);
       break;
 
+    case "game_loading":
+      showGameLoadingMessage(message.payload.message);
+      break;
+
     default:
       console.log("Unknown message type:", message.type);
   }
+}
+
+// Show game loading message
+function showGameLoadingMessage(message) {
+  const statusText = document.getElementById("status-text");
+  statusText.textContent = message;
+  
+  // Hide all other UI elements
+  const gameGrid = document.getElementById("game-grid");
+  const timeSelection = document.getElementById("time-selection");
+  const paymentPrompt = document.getElementById("payment-prompt");
+  
+  gameGrid.classList.add("hidden");
+  timeSelection.classList.add("hidden");
+  paymentPrompt.classList.add("hidden");
 }
 
 // Position the browser window over the game window
@@ -93,6 +113,176 @@ function positionOverGame(windowInfo) {
   // Set a unique window title that we can search for in OS commands
   document.title = "SPETS ARCADE - TIMEOUT OVERLAY";
   
+  // The timeout overlay should already be showing from updateUIState
+  // This function just handles any additional positioning logic if needed
+}
+
+// Handle keypresses during timeout overlay
+function handleTimeoutKeypress(event) {
+  console.log("Key pressed in timeout overlay:", event.key, "Current state:", appState.currentState);
+  
+  if (appState.currentState !== STATE.EXTEND_TIME && appState.currentState !== STATE.EXTEND_PAYMENT) {
+    console.log("Not in extend time or payment state, removing key handler");
+    document.removeEventListener("keydown", handleTimeoutKeypress);
+    return;
+  }
+
+  // Bring window to focus with each keypress
+  window.focus();
+
+  // Handle keys based on current state
+  if (appState.currentState === STATE.EXTEND_TIME) {
+    // Time selection handling during timeout
+    switch (event.key) {
+      case "ArrowLeft":
+        if (appState.timeValue > 1) {
+          appState.timeValue--;
+          updateTimeSliderInOverlay();
+          updatePrice();
+        }
+        break;
+        
+      case "ArrowRight":
+        if (appState.timeValue < 60) {
+          appState.timeValue++;
+          updateTimeSliderInOverlay();
+          updatePrice();
+        }
+        break;
+        
+      case "Enter":
+        // Move to payment step
+        const instructions = document.getElementById("timeout-instructions");
+        if (instructions) {
+          instructions.textContent = 'Step 2: Press "P" to pay and resume your game';
+        }
+        
+        // Send message to confirm time selection
+        sendMessage("selectTime", appState.timeValue);
+        
+        // State will be updated via WebSocket message
+        break;
+        
+      case "Escape":
+        // Handle quit - go back to game selection
+        handleQuitGame();
+        break;
+    }
+  } else if (appState.currentState === STATE.EXTEND_PAYMENT) {
+    // Payment handling during timeout
+    console.log("In EXTEND_PAYMENT state, key pressed:", event.key);
+    
+    switch (event.key) {
+      case "p":
+      case "P":
+        console.log("P key detected in payment state, calling handleExtendPayment()");
+        handleExtendPayment();
+        break;
+        
+      case "Escape":
+        console.log("ESC key detected, going back to time selection");
+        appState.currentState = STATE.EXTEND_TIME;
+        updateUIState(STATE.EXTEND_TIME);
+        break;
+    }
+  }
+}
+
+// Update the time slider in the overlay
+function updateTimeSliderInOverlay() {
+  const overlay = document.getElementById("game-overlay");
+  if (overlay) {
+    const slider = overlay.querySelector("#time-slider");
+    if (slider) {
+      slider.value = appState.timeValue;
+    }
+  }
+  
+  // Also update the original slider
+  const originalSlider = document.getElementById("time-slider");
+  if (originalSlider) {
+    originalSlider.value = appState.timeValue;
+  }
+}
+
+// Handle extend payment
+function handleExtendPayment() {
+  console.log("handleExtendPayment() called - Processing payment for time extension");
+  
+  // Update status immediately
+  const instructions = document.getElementById("timeout-instructions");
+  if (instructions) {
+    instructions.textContent = 'PROCESSING PAYMENT... RESUMING GAME...';
+  }
+  
+  // Get current UI status for logging
+  const statusText = document.getElementById("status-text");
+  console.log("Current status text:", statusText ? statusText.textContent : "Not found");
+
+  // Send payment message with additional logging
+  console.log("Sending payment message with game:", appState.selectedGameName, "minutes:", appState.timeValue);
+  
+  // Force a direct payment message via a separate approach
+  try {
+    const payloadData = {
+      gameName: appState.selectedGameName,
+      minutes: appState.timeValue,
+    };
+    
+    // Log the exact JSON being sent
+    const messageJSON = JSON.stringify({
+      type: "payment",
+      payload: payloadData
+    });
+    console.log("Sending payment JSON:", messageJSON);
+    
+    // Send via WebSocket
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(messageJSON);
+    } else {
+      console.error("WebSocket not open, state:", socket ? socket.readyState : "null");
+    }
+  } catch (e) {
+    console.error("Error sending payment message:", e);
+  }
+
+  // Show processing state for a moment, then hide overlay
+  setTimeout(() => {
+    const overlay = document.getElementById("game-overlay");
+    if (overlay) {
+      overlay.style.display = "none";
+    }
+    
+    // Reset state
+    appState.currentState = STATE.SELECT_GAME;
+    
+    console.log("Payment processed, browser should close and game should resume");
+  }, 500);
+}
+
+// Handle quit game
+function handleQuitGame() {
+  console.log("Player chose to quit game");
+  
+  // Hide overlay
+  const overlay = document.getElementById("game-overlay");
+  if (overlay) {
+    overlay.style.display = "none";
+  }
+
+  // Send quit message
+  sendMessage("quit", {});
+
+  // Remove timeout key handler
+  document.removeEventListener("keydown", handleTimeoutKeypress);
+
+  // Update UI state will be handled via WebSocket message
+}
+
+// Show the timeout overlay immediately
+function showTimeoutOverlay() {
+  console.log("Showing timeout overlay");
+
   // Play a notification sound to get attention
   playAlertSound();
 
@@ -104,18 +294,24 @@ function positionOverGame(windowInfo) {
     document.body.appendChild(overlay);
   }
 
+  // Clear existing content
+  overlay.innerHTML = "";
+  
+  // Add title tag to help window managers identify this window
+  document.title = "SPETS ARCADE - TIMEOUT OVERLAY";
+
   // Style overlay to match game window - enhance styling for visibility
   overlay.style.position = "fixed";
   overlay.style.left = "0";
   overlay.style.top = "0";
   overlay.style.width = "100%";
   overlay.style.height = "100%";
-  overlay.style.backgroundColor = "rgba(0, 0, 0, 0.9)"; // More opaque background
+  overlay.style.backgroundColor = "rgba(0, 0, 0, 0.9)";
   overlay.style.display = "flex";
   overlay.style.flexDirection = "column";
   overlay.style.justifyContent = "center";
   overlay.style.alignItems = "center";
-  overlay.style.zIndex = "999999"; // Extremely high z-index
+  overlay.style.zIndex = "999999";
   
   // Add pulsing animation for visibility
   if (!document.getElementById('pulse-animation')) {
@@ -131,48 +327,78 @@ function positionOverGame(windowInfo) {
     document.head.appendChild(style);
   }
 
-  // Create timeout message with clearer two-step instructions
-  let timeoutMsg = document.getElementById("timeout-message");
-  if (!timeoutMsg) {
-    timeoutMsg = document.createElement("h1");
-    timeoutMsg.id = "timeout-message";
-    timeoutMsg.textContent = "TIME OUT!";
-    timeoutMsg.style.color = "#cf2e2e";
-    timeoutMsg.style.fontSize = "4rem";
-    timeoutMsg.style.marginBottom = "2rem";
-    timeoutMsg.style.textShadow = "0 0 20px rgba(255, 0, 0, 0.7)"; // Add glow
-    timeoutMsg.style.animation = "pulse 1s infinite ease-in-out"; // Add pulsing
-    overlay.appendChild(timeoutMsg);
-  }
+  // Create timeout message
+  const timeoutMsg = document.createElement("h1");
+  timeoutMsg.id = "timeout-message";
+  timeoutMsg.textContent = "TIME OUT!";
+  timeoutMsg.style.color = "#cf2e2e";
+  timeoutMsg.style.fontSize = "4rem";
+  timeoutMsg.style.marginBottom = "2rem";
+  timeoutMsg.style.textShadow = "0 0 20px rgba(255, 0, 0, 0.7)";
+  timeoutMsg.style.animation = "pulse 1s infinite ease-in-out";
+  overlay.appendChild(timeoutMsg);
 
-  // Update instructions to emphasize ENTER key for first step
-  let instructions = document.getElementById("timeout-instructions");
-  if (!instructions) {
-    instructions = document.createElement("p");
-    instructions.id = "timeout-instructions";
-    instructions.textContent = 'Step 1: Select time with ◄ ► and press ENTER to continue';
-    instructions.style.color = "#fecda5";
-    instructions.style.fontSize = "1.5rem";
-    overlay.appendChild(instructions);
-  }
+  // Create instructions
+  const instructions = document.createElement("p");
+  instructions.id = "timeout-instructions";
+  instructions.textContent = 'Step 1: Select time with ◄ ► and press ENTER to continue';
+  instructions.style.color = "#fecda5";
+  instructions.style.fontSize = "1.5rem";
+  instructions.style.marginBottom = "2rem";
+  overlay.appendChild(instructions);
 
-  // Show the time selection UI
-  const timeSelection = document.getElementById("time-selection");
-  timeSelection.classList.remove("hidden");
-  timeSelection.style.position = "relative";
-  timeSelection.style.zIndex = "1001";
+  // Clone the time selection UI into the overlay
+  const originalTimeSelection = document.getElementById("time-selection");
+  const timeSelectionClone = originalTimeSelection.cloneNode(true);
+  timeSelectionClone.style.position = "relative";
+  timeSelectionClone.style.zIndex = "1001";
+  timeSelectionClone.style.display = "block";
+  overlay.appendChild(timeSelectionClone);
 
-  // Add key handler for overlay - initially just for time selection
+  // Add quit option
+  const quitInstructions = document.createElement("p");
+  quitInstructions.textContent = 'Press ESC to quit and return to game selection';
+  quitInstructions.style.color = "#888";
+  quitInstructions.style.fontSize = "1rem";
+  quitInstructions.style.marginTop = "2rem";
+  overlay.appendChild(quitInstructions);
+
+  // Add key handler for overlay - make sure we only add it once
+  document.removeEventListener("keydown", handleTimeoutKeypress);
   document.addEventListener("keydown", handleTimeoutKeypress);
+  console.log("Added keydown event listener for timeout overlay");
+
+  // Add a direct P key listener to the document as a more robust failsafe
+  // This will be active for the whole document, to catch P keys that might be missed
+  const globalPKeyHandler = function(event) {
+    console.log("Global keypress event:", event.key, "Current state:", appState.currentState);
+    if ((event.key === 'p' || event.key === 'P') && 
+        (appState.currentState === STATE.EXTEND_PAYMENT || appState.currentState === STATE.EXTEND_TIME)) {
+      console.log("P key detected from global key handler - processing payment");
+      handleExtendPayment();
+    }
+  };
+  
+  // Remove any existing handler first to prevent duplicates
+  document.removeEventListener("keypress", globalPKeyHandler);
+  document.removeEventListener("keydown", globalPKeyHandler);
+  
+  // Add to both keypress and keydown events for maximum compatibility
+  document.addEventListener("keypress", globalPKeyHandler);
+  document.addEventListener("keydown", globalPKeyHandler);
+  
+  // Store the handler reference in window to ensure it's accessible for debugging
+  window.globalPKeyHandler = globalPKeyHandler;
 
   // Force focus to the window
   window.focus();
   
-  // Try to repeatedly focus the window for the next several seconds
+  // Continuously attempt to focus and play sound for maximum attention
   let focusAttempts = 0;
   const focusInterval = setInterval(() => {
     window.focus();
-    // Flash the overlay background color to draw attention
+    
+    // Flash the overlay with a red color to draw attention
     if (overlay) {
       const originalBg = overlay.style.backgroundColor;
       overlay.style.backgroundColor = "rgba(255, 0, 0, 0.7)";
@@ -181,120 +407,31 @@ function positionOverGame(windowInfo) {
       }, 100);
     }
     
+    // Play sound every few seconds for maximum attention
+    if (focusAttempts % 6 === 0) { // Every ~3 seconds
+      playAlertSound();
+    }
+    
     focusAttempts++;
-    if (focusAttempts > 20) { // Try for about 10 seconds
+    if (focusAttempts > 40) { // Longer attention-grabbing period (20 seconds)
       clearInterval(focusInterval);
     }
   }, 500);
   
-  // Add a backup timeout reminder after 30 seconds if the user hasn't interacted
-  setTimeout(() => {
-    if (appState.currentState === STATE.EXTEND_TIME) {
-      // Flash the timeout message more aggressively
-      if (timeoutMsg) {
-        timeoutMsg.style.fontSize = "5rem";
-        timeoutMsg.style.color = "#ff0000";
-        timeoutMsg.style.animation = "pulse 0.5s infinite ease-in-out";
-      }
-      window.focus();
-    }
-  }, 30000);
-}
-
-// Handle keypresses during timeout overlay
-function handleTimeoutKeypress(event) {
-  if (appState.currentState !== STATE.EXTEND_TIME) {
-    document.removeEventListener("keydown", handleTimeoutKeypress);
-    return;
-  }
-
-  // Bring window to focus with each keypress
-  window.focus();
-
-  // Time selection handling during timeout
-  switch (event.key) {
-    case "ArrowLeft":
-      if (appState.timeValue > 1) {
-        appState.timeValue--;
-        document.getElementById("time-slider").value = appState.timeValue;
-        updatePrice();
-      }
-      break;
-      
-    case "ArrowRight":
-      if (appState.timeValue < 60) {
-        appState.timeValue++;
-        document.getElementById("time-slider").value = appState.timeValue;
-        updatePrice();
-      }
-      break;
-      
-    case "Enter":
-      // First step: Confirm time selection and move to payment step
-      const statusText = document.getElementById("status-text");
-      statusText.textContent = "Step 2: PRESS 'P' TO INSERT COIN AND RESUME GAME";
-      
-      // Send message to confirm time selection
-      sendMessage("selectTime", appState.timeValue);
-      
-      // Transition to payment state
-      updateUIState(STATE.EXTEND_PAYMENT);
-      
-      // Remove this handler since we'll transition to payment state
-      document.removeEventListener("keydown", handleTimeoutKeypress);
-      break;
-      
-    case "Escape":
-      // Handle quit - go back to game selection
-      const overlay = document.getElementById("game-overlay");
-      if (overlay) {
-        overlay.style.display = "none";
-      }
-
-      // Send quit message
-      sendMessage("quit", {});
-
-      // Update UI state
-      updateUIState(STATE.SELECT_GAME);
-
-      // Remove this key handler
-      document.removeEventListener("keydown", handleTimeoutKeypress);
-      break;
-  }
-}
-
-// Add a new handler for the payment confirmation step
-function handleExtendPaymentKeys(event) {
-  if (appState.currentState !== STATE.EXTEND_PAYMENT) {
-    return;
-  }
-
-  if (event.key === "p" || event.key === "P") {
-    // Handle payment for time extension
-    const statusText = document.getElementById("status-text");
-    statusText.textContent = "RESUMING GAME...";
-
-    // Hide overlay
-    const overlay = document.getElementById("game-overlay");
-    if (overlay) {
-      overlay.style.display = "none";
-    }
-
-    // Send payment message
-    sendMessage("payment", {
-      gameName: appState.selectedGameName,
-      minutes: appState.timeValue,
+  // Request fullscreen on the overlay element directly for better focus
+  if (overlay.requestFullscreen) {
+    overlay.requestFullscreen().catch(e => {
+      console.warn("Couldn't enter fullscreen mode on overlay:", e);
+      // Fallback to document fullscreen
+      requestFullscreen();
     });
-
-    // We'll let the window close itself after a short delay
-    setTimeout(() => {
-      console.log("Closing browser window after payment");
-      window.close();
-    }, 1000);
+  } else {
+    // Fallback to document fullscreen
+    requestFullscreen();
   }
 }
 
-// Play alert sound to grab attention
+// Play alert sound to grab attention - louder and more noticeable
 function playAlertSound() {
   try {
     // Create an audio context
@@ -306,17 +443,112 @@ function playAlertSound() {
     const gainNode = audioCtx.createGain();
     
     oscillator.type = 'square';
-    oscillator.frequency.value = 440; // value in hertz
+    oscillator.frequency.value = 880; // Higher pitch (880Hz) for more attention
+    gainNode.gain.value = 0.8; // Louder volume
+    
     oscillator.connect(gainNode);
     gainNode.connect(audioCtx.destination);
     
-    // Start and stop the beep
+    // Start and stop the beep with a pattern
     oscillator.start();
-    setTimeout(() => {
-      oscillator.stop();
-    }, 500);
+    
+    // Create a more attention-grabbing pattern
+    setTimeout(() => oscillator.frequency.value = 440, 150);
+    setTimeout(() => oscillator.frequency.value = 880, 300);
+    setTimeout(() => oscillator.stop(), 500);
   } catch (e) {
     console.error("Could not play alert sound:", e);
+  }
+}
+
+// Update the UI based on the current state
+function updateUIState(newState) {
+  console.log("Updating UI state from", appState.currentState, "to", newState);
+  
+  // If transitioning from EXTEND_TIME to EXTEND_PAYMENT, send an extra selectTime message
+  // This helps ensure server and client states stay in sync
+  if (appState.currentState === STATE.EXTEND_TIME && newState === STATE.EXTEND_PAYMENT) {
+    console.log("Critical state transition: Sending additional selectTime message");
+    sendMessage("selectTime", appState.timeValue);
+  }
+  
+  // Previous state for transitions
+  const prevState = appState.currentState;
+  
+  // Update current state
+  appState.currentState = newState;
+
+  const gameGrid = document.getElementById("game-grid");
+  const timeSelection = document.getElementById("time-selection");
+  const paymentPrompt = document.getElementById("payment-prompt");
+  const statusText = document.getElementById("status-text");
+
+  // Hide all sections first
+  gameGrid.classList.add("hidden");
+  timeSelection.classList.add("hidden");
+  paymentPrompt.classList.add("hidden");
+
+  // Remove overlay if present and not in an overlay-active state
+  if (newState !== STATE.EXTEND_TIME && newState !== STATE.EXTEND_PAYMENT) {
+    console.log("State not extend_time or extend_payment, removing overlay");
+    const overlay = document.getElementById("game-overlay");
+    if (overlay) {
+      overlay.style.display = "none";
+    }
+    // Remove timeout key handler when leaving extend time/payment states
+    document.removeEventListener("keydown", handleTimeoutKeypress);
+  } else {
+    console.log("In extend_time or extend_payment state, keeping overlay and key handler");
+  }
+
+  // Show appropriate section based on state
+  switch (newState) {
+    case STATE.SELECT_GAME:
+      statusText.textContent = "◄ ► ▲ ▼ NAVIGATE    ENTER TO CONTINUE";
+      gameGrid.classList.remove("hidden");
+      break;
+
+    case STATE.TIME_SELECT:
+      statusText.textContent = "◄ ► ADJUST TIME    ENTER TO CONTINUE";
+      timeSelection.classList.remove("hidden");
+      updatePrice();
+      break;
+
+    case STATE.PAYMENT:
+      statusText.textContent = "PRESS 'P' TO INSERT COIN AND START GAME";
+      paymentPrompt.classList.remove("hidden");
+      break;
+
+    case STATE.EXTEND_TIME:
+      statusText.textContent = "TIME OUT! Select additional time and press ENTER";
+      timeSelection.classList.remove("hidden");
+      paymentPrompt.classList.add("hidden");
+      updatePrice();
+      
+      // Immediately show the timeout overlay when entering this state
+      showTimeoutOverlay();
+      break;
+
+    case STATE.EXTEND_PAYMENT:
+      console.log("Entered EXTEND_PAYMENT state, setting up payment UI");
+      statusText.textContent = "Step 2: PRESS 'P' TO INSERT COIN AND RESUME GAME";
+      timeSelection.classList.add("hidden");
+      paymentPrompt.classList.remove("hidden");
+      
+      // Update overlay instructions if it exists
+      const instructions = document.getElementById("timeout-instructions");
+      if (instructions) {
+        instructions.textContent = 'Step 2: Press "P" to pay and resume your game';
+      }
+      
+      // Force focus to make sure key events are captured
+      window.focus();
+      break;
+
+    case STATE.GAME_LOADING:
+      statusText.textContent = "STARTING GAME... PLEASE WAIT";
+      // Keep all UI elements hidden during loading
+      break;
   }
 }
 
@@ -445,71 +677,6 @@ function updatePrice() {
   } minutes)`;
 }
 
-// Update the UI based on the current state
-function updateUIState(newState) {
-  // Previous state for transitions
-  const prevState = appState.currentState;
-  
-  // Update current state
-  appState.currentState = newState;
-
-  const gameGrid = document.getElementById("game-grid");
-  const timeSelection = document.getElementById("time-selection");
-  const paymentPrompt = document.getElementById("payment-prompt");
-  const statusText = document.getElementById("status-text");
-
-  // Hide all sections first
-  gameGrid.classList.add("hidden");
-  timeSelection.classList.add("hidden");
-  paymentPrompt.classList.add("hidden");
-
-  // Remove overlay if present and not in extend time state
-  if (newState !== STATE.EXTEND_TIME) {
-    const overlay = document.getElementById("game-overlay");
-    if (overlay) {
-      overlay.style.display = "none";
-    }
-  }
-
-  // Show appropriate section based on state
-  switch (newState) {
-    case STATE.SELECT_GAME:
-      statusText.textContent = "◄ ► ▲ ▼ NAVIGATE    ENTER TO CONTINUE";
-      gameGrid.classList.remove("hidden");
-      break;
-
-    case STATE.TIME_SELECT:
-      statusText.textContent = "◄ ► ADJUST TIME    ENTER TO CONTINUE";
-      timeSelection.classList.remove("hidden");
-      updatePrice();
-      break;
-
-    case STATE.PAYMENT:
-      statusText.textContent = "PRESS 'P' TO INSERT COIN AND START GAME";
-      paymentPrompt.classList.remove("hidden");
-      break;
-
-    case STATE.EXTEND_TIME:
-      statusText.textContent = "TIME OUT! Select additional time and press ENTER";
-      timeSelection.classList.remove("hidden");
-      paymentPrompt.classList.add("hidden"); // Ensure payment prompt is hidden
-      updatePrice();
-      break;
-
-    case STATE.EXTEND_PAYMENT:
-      statusText.textContent = "Step 2: PRESS 'P' TO INSERT COIN AND RESUME GAME";
-      timeSelection.classList.add("hidden"); // Hide time selection
-      paymentPrompt.classList.remove("hidden"); // Show payment prompt
-      
-      // Update overlay instructions if it exists
-      const instructions = document.getElementById("timeout-instructions");
-      if (instructions) {
-        instructions.textContent = 'Step 2: Press "P" to pay and resume your game';
-      }
-      break;
-  }
-}
-
 // Setup event listeners for keyboard navigation and interaction
 function setupEventListeners() {
   // Time slider input event
@@ -521,6 +688,11 @@ function setupEventListeners() {
 
   // Keyboard navigation
   document.addEventListener("keydown", (event) => {
+    // Don't handle keys if timeout overlay is active - that has its own handler
+    if (appState.currentState === STATE.EXTEND_TIME || appState.currentState === STATE.EXTEND_PAYMENT) {
+      return;
+    }
+    
     switch (appState.currentState) {
       case STATE.SELECT_GAME:
         handleGameSelectionKeys(event);
@@ -532,14 +704,6 @@ function setupEventListeners() {
 
       case STATE.PAYMENT:
         handlePaymentKeys(event);
-        break;
-
-      case STATE.EXTEND_TIME:
-        handleTimeoutKeypress(event);
-        break;
-
-      case STATE.EXTEND_PAYMENT:
-        handleExtendPaymentKeys(event);
         break;
     }
   });
@@ -620,65 +784,16 @@ function handlePaymentKeys(event) {
   if (event.key === "p" || event.key === "P") {
     // Show a loading indicator in the status text
     const statusText = document.getElementById("status-text");
-    statusText.textContent = "LAUNCHING GAME... PLEASE WAIT";
+    statusText.textContent = "STARTING GAME... PLEASE WAIT";
 
-    // Send payment message and close this window
+    // Send payment message - browser will close when game is fully loaded
     sendMessage("payment", {
       gameName: appState.selectedGameName,
       minutes: appState.timeValue,
     });
     
-    // Set a timeout to close this window after message is sent
-    setTimeout(() => {
-      window.close();
-    }, 500);
-  }
-}
-
-// Handle keyboard input in extend time state
-function handleExtendTimeKeys(event) {
-  const timeSlider = document.getElementById("time-slider");
-
-  switch (event.key) {
-    case "ArrowLeft":
-      if (appState.timeValue > 1) {
-        appState.timeValue--;
-        timeSlider.value = appState.timeValue;
-        updatePrice();
-      }
-      break;
-
-    case "ArrowRight":
-      if (appState.timeValue < 60) {
-        appState.timeValue++;
-        timeSlider.value = appState.timeValue;
-        updatePrice();
-      }
-      break;
-
-    case "p":
-    case "P":
-      // Show a loading indicator in the status text
-      const statusText = document.getElementById("status-text");
-      statusText.textContent = "RESUMING GAME... PLEASE WAIT";
-
-      // Hide overlay if present
-      const overlay = document.getElementById("game-overlay");
-      if (overlay) {
-        overlay.style.display = "none";
-      }
-
-      // Send payment message
-      sendMessage("payment", {
-        gameName: appState.selectedGameName,
-        minutes: appState.timeValue,
-      });
-      
-      // Set a timeout to close this window after message is sent
-      setTimeout(() => {
-        window.close();
-      }, 500);
-      break;
+    // Don't close window immediately - wait for game loading confirmation
+    // The server will close the browser when Ludo confirms the game is loaded
   }
 }
 

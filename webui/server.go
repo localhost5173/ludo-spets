@@ -13,6 +13,19 @@ import (
 	"github.com/libretro/ludo/ludo"
 )
 
+// ServerState represents different states of the application
+type ServerState int
+
+const (
+	StateSelectGame ServerState = iota
+	StateTimeSelect
+	StatePayment
+	StateExtendTime
+	StateExtendPayment
+	StateGameLoading // Add new state for when game is loading
+	StateGameActive  // New state for when game is active after extension
+)
+
 // Server holds the web server state and data
 type Server struct {
 	games            map[string]string
@@ -20,8 +33,9 @@ type Server struct {
 	gamePictures     map[string]string
 	timerChan        chan int
 	resumeChan       chan bool
+	gameLoadedChan   chan bool // Add channel for game loading confirmation
 	hub              *Hub
-	state            UIState
+	state            ServerState
 	stateMutex       sync.RWMutex
 	gameWindowX      int
 	gameWindowY      int
@@ -35,26 +49,16 @@ type Server struct {
 
 const PricePerMinute = 0.5
 
-// UIState defines the different states of the UI
-type UIState int
-
-const (
-	StateSelectGame UIState = iota
-	StateTimeSelect
-	StatePayment
-	StateExtendTime
-	StateExtendPayment // Add this new state for timeout payment confirmation
-)
-
 // NewServer creates a new web server instance
 func NewServer(games, cores, gamePictures map[string]string, timerChan chan int, resumeChan chan bool) *Server {
 	s := &Server{
-		games:        games,
-		cores:        cores,
-		gamePictures: gamePictures,
-		timerChan:    timerChan,
-		resumeChan:   resumeChan,
-		state:        StateSelectGame,
+		games:          games,
+		cores:          cores,
+		gamePictures:   gamePictures,
+		timerChan:      timerChan,
+		resumeChan:     resumeChan,
+		gameLoadedChan: make(chan bool, 1), // Add buffered channel for game loading
+		state:          StateSelectGame,
 	}
 
 	// Create WebSocket hub
@@ -108,7 +112,15 @@ func (s *Server) launchBrowserFullscreen(url string) {
 	switch runtime.GOOS {
 	case "linux":
 		if _, err := exec.LookPath("google-chrome"); err == nil {
-			cmd = exec.Command("google-chrome", "--kiosk", "--new-window", "--window-position=0,0", "--display=:0.0", "--app="+url)
+			cmd = exec.Command("google-chrome",
+				"--kiosk",
+				"--new-window",
+				"--window-position=0,0",
+				"--display=:0.0",
+				"--start-maximized",
+				"--start-fullscreen",
+				"--no-first-run",
+				"--app="+url)
 		} else if _, err := exec.LookPath("chromium-browser"); err == nil {
 			cmd = exec.Command("chromium-browser", "--kiosk", "--window-position=0,0", "--display=:0.0", "--app="+url)
 		} else if _, err := exec.LookPath("firefox"); err == nil {
@@ -209,14 +221,14 @@ func (s *Server) handleGames(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetState returns the current UI state
-func (s *Server) GetState() UIState {
+func (s *Server) GetState() ServerState {
 	s.stateMutex.RLock()
 	defer s.stateMutex.RUnlock()
 	return s.state
 }
 
 // SetState updates the UI state
-func (s *Server) SetState(state UIState) {
+func (s *Server) SetState(state ServerState) {
 	s.stateMutex.Lock()
 	s.state = state
 	s.stateMutex.Unlock()
@@ -227,44 +239,71 @@ func (s *Server) SetState(state UIState) {
 
 // LaunchGame starts a game with the given name and time
 func (s *Server) LaunchGame(gameName string, minutes int) {
-	// First close any browser windows
-	s.closeBrowserWindows()
+	log.Printf("Launching game: %s for %d minutes", gameName, minutes)
+
+	// Set state to loading
+	s.SetState(StateGameLoading)
+
+	// Send loading message to clients
+	msg := Message{
+		Type: "game_loading",
+		Payload: map[string]interface{}{
+			"message": "Starting game...",
+		},
+	}
+
+	jsonMsg, _ := json.Marshal(msg)
+	s.hub.broadcast <- jsonMsg
 
 	corePath := s.cores[gameName]
 	gamePath := s.games[gameName]
-	durationSecs := minutes * 2 // Change to 60 for production
+	durationSecs := minutes * 2 // Change to 2 minutes for testing
 
-	log.Printf("Launching game: %s with core: %s for %d seconds\n", gamePath, corePath, durationSecs)
-
-	// Create a channel to receive errors from the game goroutine
-	errChan := make(chan error, 1)
-
-	// Launch the game in its own goroutine
+	// Launch game in goroutine
 	go func() {
-		// Lock the OS thread for this goroutine to ensure GLFW/OpenGL works correctly
-		runtime.LockOSThread()
-		defer runtime.UnlockOSThread()
+		err := s.launchLudoGame(corePath, gamePath, durationSecs)
+		if err != nil {
+			log.Printf("Error launching game: %v", err)
+			// If game launch fails, go back to game selection
+			s.SetState(StateSelectGame)
+			return
+		}
 
-		// Run the game
-		err := ludo.RunGame(corePath, gamePath, durationSecs, s.timerChan, s.resumeChan)
-		errChan <- err // Send error (or nil) to the channel
-	}()
-
-	// Start a goroutine to monitor for errors
-	go func() {
+		// Wait for game loaded confirmation or timeout
 		select {
-		case err := <-errChan:
-			if err != nil {
-				log.Printf("Error running game: %v\n", err)
-				// Return to the game selection state if the game fails to launch
-				s.SetState(StateSelectGame)
-				s.hub.broadcastState()
-			}
-		case <-time.After(5 * time.Second):
-			// If no error after 5 seconds, assume game launched successfully
-			// and just leave the error monitoring goroutine
+		case <-s.gameLoadedChan:
+			log.Println("Game loaded successfully, closing browser")
+			s.closeBrowserWindows()
+		case <-time.After(10 * time.Second):
+			log.Println("Timeout waiting for game to load, closing browser anyway")
+			s.closeBrowserWindows()
 		}
 	}()
+}
+
+// OnGameLoaded should be called when Ludo has successfully loaded the game
+func (s *Server) OnGameLoaded() {
+	log.Println("Server: Game loaded confirmation received")
+	select {
+	case s.gameLoadedChan <- true:
+	default:
+		// Channel is full, ignore
+	}
+}
+
+// PrepareTimeout opens a browser window in preparation for timeout (called ~10 seconds before)
+func (s *Server) PrepareTimeout() {
+	log.Println("Preparing for timeout - opening browser window")
+	
+	// Close any existing browser windows first
+	s.closeBrowserWindows()
+	
+	// Launch a new browser window but keep it in background
+	url := "http://localhost:8080"
+	s.launchBrowserFullscreen(url)
+	
+	// Give the browser time to fully load
+	time.Sleep(2 * time.Second)
 }
 
 // HandleTimeout is called when the game timer expires
@@ -319,21 +358,32 @@ func (s *Server) HandleTimeout() {
 	s.gameWindowHeight = height
 	s.gameWindowMutex.Unlock()
 
-	// Change state to extend time
+	// First launch a new browser window since the previous one was closed
+	log.Println("Timeout occurred, launching a new browser window")
+	url := "http://localhost:8080"
+	s.launchBrowserFullscreen(url)
+	
+	// Give the browser window a moment to fully load before changing state
+	// and trying to interact with it
+	time.Sleep(500 * time.Millisecond)
+	
+	// Now that the browser is launched, change state to extend time
+	// This will trigger the UI updates in the browser
 	s.SetState(StateExtendTime)
 
 	// Send window position to clients
 	s.broadcastWindowPosition()
 
-	// Close any existing browser windows and open a new one
-	s.closeBrowserWindows()
-
-	// Launch a new browser window with the timeout overlay
-	url := "http://localhost:8080"
-	log.Println("Opening new browser window for timeout screen")
-	s.launchBrowserFullscreen(url)
-
-	// No need to call forceBrowserToForeground() since we're opening a fresh window
+	// Try to force the browser window to the foreground
+	log.Println("Bringing browser window to foreground for timeout screen")
+	time.Sleep(200 * time.Millisecond) // Give window a moment to initialize
+	s.forceBrowserToForeground()
+	
+	// Additional attempt to force focus with a slight delay
+	time.AfterFunc(1*time.Second, func() {
+		log.Println("Making additional attempt to focus browser window")
+		s.forceBrowserToForeground()
+	})
 }
 
 // forceBrowserToForeground brings the browser window to the foreground
@@ -343,9 +393,23 @@ func (s *Server) forceBrowserToForeground() {
 	switch runtime.GOOS {
 	case "linux":
 		if _, err := exec.LookPath("wmctrl"); err == nil {
-			cmd = exec.Command("wmctrl", "-a", "SPETS ARCADE")
-			if err := cmd.Run(); err != nil {
-				log.Printf("Couldn't find window with title 'SPETS ARCADE': %v", err)
+			// Try multiple window title variations
+			titles := []string{"SPETS ARCADE", "SPETS ARCADE - TIMEOUT OVERLAY", "Google Chrome", "Chrome"}
+			
+			for _, title := range titles {
+				cmd = exec.Command("wmctrl", "-a", title)
+				log.Printf("Trying to focus window with title: %s", title)
+				err := cmd.Run()
+				if err == nil {
+					log.Printf("Successfully focused window with title: %s", title)
+					return
+				}
+			}
+			
+			// If specific titles fail, try a more general approach
+			generalCmd := exec.Command("bash", "-c", "wmctrl -a Chrome || wmctrl -a Firefox || wmctrl -R localhost:8080")
+			if err := generalCmd.Run(); err != nil {
+				log.Printf("Failed to focus any browser window: %v", err)
 			}
 		}
 	case "darwin":
@@ -412,6 +476,11 @@ func (s *Server) broadcastWindowPosition() {
 	}
 
 	s.hub.broadcast <- jsonData
+}
+
+// launchLudoGame launches a game using the ludo package
+func (s *Server) launchLudoGame(corePath, gamePath string, durationSecs int) error {
+	return ludo.RunGame(corePath, gamePath, durationSecs, s.timerChan, s.resumeChan)
 }
 
 // RunGame is a wrapper around ludo.RunGame

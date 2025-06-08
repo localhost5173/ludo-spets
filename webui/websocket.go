@@ -166,52 +166,72 @@ func (c *Client) handleMessage(msg Message) {
 		}
 		
 	case "selectTime":
+		log.Printf("Received selectTime in state: %v", c.hub.server.GetState())
 		if c.hub.server.GetState() == StateTimeSelect {
+			log.Printf("Transitioning from TimeSelect to Payment")
 			c.hub.server.SetState(StatePayment)
 		} else if c.hub.server.GetState() == StateExtendTime {
 			// When in timeout extension mode, move to payment confirmation step
-			log.Printf("Moving from time selection to payment confirmation")
+			log.Printf("Transitioning from ExtendTime to ExtendPayment")
 			c.hub.server.SetState(StateExtendPayment)
+			// Add a slight delay to ensure state is fully updated
+			time.Sleep(100 * time.Millisecond)
+			log.Printf("State after transition: %v", c.hub.server.GetState())
 		}
 		
 	case "payment":
-		if c.hub.server.GetState() == StatePayment || c.hub.server.GetState() == StateExtendPayment {
-			// Parse payload
-			paymentData := struct {
-				GameName string `json:"gameName"`
-				Minutes  int    `json:"minutes"`
-			}{}
+		log.Printf("Received payment message in state: %v", c.hub.server.GetState())
+		
+		// Parse payload regardless of state
+		paymentData := struct {
+			GameName string `json:"gameName"`
+			Minutes  int    `json:"minutes"`
+		}{}
+		
+		payloadBytes, _ := json.Marshal(msg.Payload)
+		if err := json.Unmarshal(payloadBytes, &paymentData); err != nil {
+			log.Printf("Error parsing payment data: %v", err)
+			return
+		}
+		
+		log.Printf("Payment data parsed: Game: %s, Minutes: %d", paymentData.GameName, paymentData.Minutes)
+		
+		// Expanded state handling for payment
+		currentState := c.hub.server.GetState()
+		if currentState == StatePayment {
+			// Initial game launch
+			log.Printf("Processing initial game payment")
+			c.hub.server.LaunchGame(paymentData.GameName, paymentData.Minutes)
+		} else if currentState == StateExtendPayment || currentState == StateExtendTime {
+			// Accept payment in either ExtendTime or ExtendPayment state
+			// This helps overcome any state synchronization issues
+			log.Printf("Processing time extension payment in state: %v", currentState)
 			
-			payloadBytes, _ := json.Marshal(msg.Payload)
-			if err := json.Unmarshal(payloadBytes, &paymentData); err != nil {
-				log.Printf("Error parsing payment data: %v", err)
-				return
-			}
+			// Convert minutes to seconds (multiply by 2 for testing)
+			newDurationSecs := paymentData.Minutes * 2
 			
-			// Handle payment and game launch
-			if c.hub.server.GetState() == StatePayment {
-				 // Initial game launch - close browser windows before launching game
-				c.hub.server.LaunchGame(paymentData.GameName, paymentData.Minutes)
-			} else {
-				// Handle time extension
-				log.Printf("Resuming game with %d more minutes", paymentData.Minutes)
-				
-				// Send resume signal before closing browser - in case client needs to respond
-				c.hub.server.resumeChan <- true
-				c.hub.server.timerChan <- paymentData.Minutes * 2 // Change to 2 minutes for testing
-				
-				// Small delay to ensure signals are processed
-				time.Sleep(100 * time.Millisecond)
-				
-				// Now close the browser windows
-				c.hub.server.closeBrowserWindows()
-				
-				// Change state back to game selection after sending signals
-				// This is important so if a new window opens, it shows the game selection
-				time.AfterFunc(500*time.Millisecond, func() {
-					c.hub.server.SetState(StateSelectGame)
-				})
-			}
+			// Send signals in the correct order
+			log.Printf("Sending resume signal...")
+			c.hub.server.resumeChan <- true
+			
+			// Small delay to ensure resume signal is processed
+			time.Sleep(50 * time.Millisecond)
+			
+			log.Printf("Sending new timer duration: %d seconds", newDurationSecs)
+			c.hub.server.timerChan <- newDurationSecs
+			
+			// Wait a bit more to ensure signals are processed
+			time.Sleep(100 * time.Millisecond)
+			
+			// Now close the browser windows to return focus to the game
+			log.Printf("Closing browser window...")
+			c.hub.server.closeBrowserWindows()
+			
+			// Set state to GameActive as the game should be running
+			log.Printf("Setting state to GameActive")
+			c.hub.server.SetState(StateGameActive)
+		} else {
+			log.Printf("Ignoring payment message in unsupported state: %v", currentState)
 		}
 		
 	case "quit":

@@ -44,7 +44,7 @@ func main() {
 	// Create the web server
 	server := webui.NewServer(games, cores, gamePictures, timerChan, resumeChan)
 
-	// Monitor timer events using a ticker
+	// Monitor timer events and game loading using a ticker
 	ticker := time.NewTicker(100 * time.Millisecond)
 	go func() {
 		defer ticker.Stop()
@@ -55,6 +55,14 @@ func main() {
 					// Timer expired, tell the server to handle it
 					fmt.Println("Main: Received timer expired signal (-1)")
 					server.HandleTimeout()
+				} else if signal == -2 {
+					// Prepare timeout - open browser window but don't show timeout UI yet
+					fmt.Println("Main: Received prepare timeout signal (-2)")
+					server.PrepareTimeout()
+				} else if signal == -999 {
+					// Special signal indicating game is loaded
+					fmt.Println("Main: Received game loaded signal")
+					server.OnGameLoaded()
 				}
 			default:
 				// No signal, continue
