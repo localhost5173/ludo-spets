@@ -30,35 +30,36 @@ const (
 
 const pricePerMinute = 0.5
 
-// Define our custom colors
+// Define our custom colors for dark theme
 var (
-	colorCream     = color.NRGBA{R: 0xfe, G: 0xcd, B: 0xa5, A: 0xff} // #fecda5
-	colorRed       = color.NRGBA{R: 0xcf, G: 0x2e, B: 0x2e, A: 0xff} // #cf2e2e
-	colorBlack     = color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xff} // #000000
-	colorDarkGray  = color.NRGBA{R: 0x1a, G: 0x1a, B: 0x1a, A: 0xff} // Dark background for tiles
-	colorMedGray   = color.NRGBA{R: 0x2d, G: 0x2d, B: 0x2d, A: 0xff} // Medium gray for borders
-	colorLightGray = color.NRGBA{R: 0x40, G: 0x40, B: 0x40, A: 0xff} // Light gray for hover
+	colorPrimary    = color.NRGBA{R: 0xcf, G: 0x2e, B: 0x2e, A: 0xff} // #cf2e2e - Red accent
+	colorAccent     = color.NRGBA{R: 0xfe, G: 0xcd, B: 0xa5, A: 0xff} // #fecda5 - Cream accent
+	colorBackground = color.NRGBA{R: 0x0f, G: 0x0f, B: 0x0f, A: 0xff} // Very dark background
+	colorSurface    = color.NRGBA{R: 0x1a, G: 0x1a, B: 0x1a, A: 0xff} // Dark surface for cards
+	colorOnSurface  = color.NRGBA{R: 0xe0, G: 0xe0, B: 0xe0, A: 0xff} // Light text on dark surface
+	colorBorder     = color.NRGBA{R: 0x2d, G: 0x2d, B: 0x2d, A: 0xff} // Subtle borders
+	colorShadow     = color.NRGBA{R: 0x00, G: 0x00, B: 0x00, A: 0x40} // Deeper shadows for dark theme
 )
 
-// arcadeTheme defines the custom theme colors.
+// arcadeTheme defines the custom dark theme colors
 type arcadeTheme struct{}
 
 func (t arcadeTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
 	switch name {
 	case theme.ColorNameBackground:
-		return colorBlack
+		return colorBackground
 	case theme.ColorNameForeground:
-		return colorCream
+		return colorOnSurface
 	case theme.ColorNamePrimary:
-		return colorRed
+		return colorPrimary
 	case theme.ColorNameFocus:
-		return colorRed
+		return colorPrimary
 	case theme.ColorNameHover:
-		return colorLightGray
+		return color.NRGBA{R: 0x25, G: 0x25, B: 0x25, A: 0xff}
 	case theme.ColorNameSelection:
-		return color.NRGBA{R: 0xcf, G: 0x2e, B: 0x2e, A: 0x80} // Semi-transparent red
+		return color.NRGBA{R: 0xcf, G: 0x2e, B: 0x2e, A: 0x60}
 	case theme.ColorNameButton:
-		return colorDarkGray
+		return colorSurface
 	default:
 		return theme.DefaultTheme().Color(name, variant)
 	}
@@ -116,77 +117,68 @@ func NewGameTile(name, imagePath string, onSelect func()) *GameTile {
 
 // CreateRenderer implements widget.Widget
 func (g *GameTile) CreateRenderer() fyne.WidgetRenderer {
-	// Create tile background
-	background := canvas.NewRectangle(colorDarkGray)
-	background.CornerRadius = 8
+	// Create card background (dark surface)
+	cardBackground := canvas.NewRectangle(colorSurface)
+	cardBackground.CornerRadius = 6
 
-	// Create selected state border
-	selectedBorder := canvas.NewRectangle(colorRed)
-	selectedBorder.CornerRadius = 8
-	selectedBorder.StrokeWidth = 3
-	selectedBorder.StrokeColor = colorRed
-	selectedBorder.FillColor = color.Transparent
+	// Create shadow effect (deeper for dark theme)
+	shadow := canvas.NewRectangle(colorShadow)
+	shadow.CornerRadius = 6
+
+	// Create selected border (red outline when selected)
+	selectedBorder := canvas.NewRectangle(color.Transparent)
+	selectedBorder.CornerRadius = 6
+	selectedBorder.StrokeWidth = 2
+	selectedBorder.StrokeColor = colorPrimary
 	selectedBorder.Hide()
 
-	// Create hover overlay
-	hoverOverlay := canvas.NewRectangle(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x10})
-	hoverOverlay.CornerRadius = 8
+	// Create hover effect
+	hoverOverlay := canvas.NewRectangle(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x08})
+	hoverOverlay.CornerRadius = 6
 	hoverOverlay.Hide()
 
-	// Create the game image
+	// Create the game image (much smaller)
 	image := canvas.NewImageFromFile(g.ImagePath)
 	image.FillMode = canvas.ImageFillContain
 
-	// Create a fixed size square container for the image with a border
-	imageBox := canvas.NewRectangle(colorMedGray)
-	imageBox.CornerRadius = 4
-
-	// Create a container to position the image within the square
-	imageContainer := container.NewStack(
-		imageBox,
-		container.NewPadded(image),
-	)
-
-	// Create game name label with improved styling
-	nameLabel := canvas.NewText(g.Name, colorCream)
-	nameLabel.TextSize = 16
+	// Create game name label (much bigger and more readable)
+	nameLabel := canvas.NewText(g.Name, colorOnSurface)
+	nameLabel.TextSize = 14 // Bigger relative to the smaller tile
 	nameLabel.Alignment = fyne.TextAlignCenter
 	nameLabel.TextStyle.Bold = true
 
-	// Container for the name with a bit of padding and fixed height
-	nameContainer := container.NewVBox(
-		layout.NewSpacer(),
-		container.NewCenter(nameLabel),
-		layout.NewSpacer(),
+	// Create compact image container
+	imageContainer := container.NewPadded(image)
+
+	// Create name container with proper spacing
+	nameContainer := container.NewCenter(nameLabel)
+
+	// Create layout optimized for smaller tiles
+	content := container.NewBorder(
+		nil, nameContainer, nil, nil,
+		imageContainer,
 	)
 
-	// Create vertical layout with image above name
-	content := container.NewVBox(
-		container.NewPadded(imageContainer),
-		nameContainer,
-	)
+	// Minimal padding for compact design
+	paddedContent := container.NewPadded(content)
 
 	return &gameTileRenderer{
 		tile:           g,
-		background:     background,
+		shadow:         shadow,
+		cardBackground: cardBackground,
 		selectedBorder: selectedBorder,
 		hoverOverlay:   hoverOverlay,
-		imageBox:       imageBox,
-		imageContainer: imageContainer,
-		nameContainer:  nameContainer,
-		content:        content,
-		objects:        []fyne.CanvasObject{background, hoverOverlay, selectedBorder, content},
+		content:        paddedContent,
+		objects:        []fyne.CanvasObject{shadow, cardBackground, hoverOverlay, selectedBorder, paddedContent},
 	}
 }
 
 type gameTileRenderer struct {
 	tile           *GameTile
-	background     *canvas.Rectangle
+	shadow         *canvas.Rectangle
+	cardBackground *canvas.Rectangle
 	selectedBorder *canvas.Rectangle
 	hoverOverlay   *canvas.Rectangle
-	imageBox       *canvas.Rectangle
-	imageContainer *fyne.Container
-	nameContainer  *fyne.Container
 	content        *fyne.Container
 	objects        []fyne.CanvasObject
 }
@@ -194,29 +186,21 @@ type gameTileRenderer struct {
 func (r *gameTileRenderer) Destroy() {}
 
 func (r *gameTileRenderer) Layout(size fyne.Size) {
-	// Set the background, selected border, and hover overlay to fill the entire tile
-	r.background.Resize(size)
+	// Position shadow slightly offset for depth effect
+	shadowOffset := float32(3)
+	r.shadow.Move(fyne.NewPos(shadowOffset, shadowOffset))
+	r.shadow.Resize(size)
+
+	// Card background fills the entire size
+	r.cardBackground.Resize(size)
 	r.selectedBorder.Resize(size)
 	r.hoverOverlay.Resize(size)
-
-	// Calculate dimensions for a square image area
-	imageSize := fyne.Min(size.Width-20, size.Width-20) // Subtract padding
-
-	// Position the content
 	r.content.Resize(size)
-
-	// Size the image container as a square
-	r.imageContainer.Resize(fyne.NewSize(imageSize, imageSize))
-	r.imageBox.Resize(fyne.NewSize(imageSize, imageSize))
-
-	// Size the name container
-	nameHeight := float32(40) // Fixed height for name
-	r.nameContainer.Resize(fyne.NewSize(size.Width, nameHeight))
 }
 
 func (r *gameTileRenderer) MinSize() fyne.Size {
-	// Fixed size for all game tiles - width: 180, height: 220
-	return fyne.NewSize(180, 220)
+	// Much smaller tiles - 1/4 of original size: 80px width, 100px height
+	return fyne.NewSize(80, 100)
 }
 
 func (r *gameTileRenderer) Objects() []fyne.CanvasObject {
@@ -226,6 +210,8 @@ func (r *gameTileRenderer) Objects() []fyne.CanvasObject {
 func (r *gameTileRenderer) Refresh() {
 	if r.tile.Selected {
 		r.selectedBorder.Show()
+		r.selectedBorder.StrokeColor = colorPrimary
+		r.selectedBorder.FillColor = color.Transparent
 	} else {
 		r.selectedBorder.Hide()
 	}
@@ -236,7 +222,8 @@ func (r *gameTileRenderer) Refresh() {
 		r.hoverOverlay.Hide()
 	}
 
-	r.background.Refresh()
+	r.shadow.Refresh()
+	r.cardBackground.Refresh()
 	r.selectedBorder.Refresh()
 	r.hoverOverlay.Refresh()
 	r.content.Refresh()
@@ -270,6 +257,7 @@ type UI struct {
 	gameScroll    *container.Scroll
 	gameTiles     []*GameTile
 	timeSlider    *widget.Slider
+	timeLabel     *widget.Label
 	priceLabel    *canvas.Text
 	paymentPrompt *canvas.Text
 	content       *fyne.Container
@@ -313,10 +301,10 @@ func NewUI(games, cores, gamePictures map[string]string, timerChan chan int, res
 		resumeChan:   resumeChan,
 	}
 
-	ui.status = canvas.NewText("◄ ► ▲ ▼ NAVIGATE    ENTER TO CONTINUE", colorCream)
-	ui.status.TextSize = 24
+	// Status text without time selection hint
+	ui.status = canvas.NewText("◄ ► ▲ ▼ NAVIGATE    ENTER TO CONTINUE", colorOnSurface)
+	ui.status.TextSize = 18
 	ui.status.Alignment = fyne.TextAlignCenter
-	ui.status.TextStyle.Bold = true
 
 	// Create game tiles and grid
 	ui.createGameGrid()
@@ -325,47 +313,25 @@ func NewUI(games, cores, gamePictures map[string]string, timerChan chan int, res
 	ui.timeSlider.Step = 1
 	ui.timeSlider.SetValue(5)
 
-	ui.priceLabel = canvas.NewText("", colorCream)
+	// Create time selection label
+	ui.timeLabel = widget.NewLabel("Select Playing Time (minutes):")
+	ui.timeLabel.TextStyle.Bold = true
+
+	ui.priceLabel = canvas.NewText("", colorOnSurface)
 	ui.priceLabel.TextSize = 20
 	ui.priceLabel.Alignment = fyne.TextAlignCenter
-	ui.updatePrice() // Set initial price
+	ui.updatePrice()
 
-	ui.paymentPrompt = canvas.NewText("PRESS 'P' TO INSERT COIN", colorRed)
+	ui.paymentPrompt = canvas.NewText("PRESS 'P' TO INSERT COIN", colorPrimary)
 	ui.paymentPrompt.TextSize = 26
 	ui.paymentPrompt.Alignment = fyne.TextAlignCenter
 
-	// Create header with title and status
-	title := canvas.NewText("SPETS ARCADE", colorRed)
-	title.TextSize = 36
-	title.Alignment = fyne.TextAlignCenter
-	title.TextStyle.Bold = true
-
-	header := container.NewVBox(
-		container.NewCenter(title),
-		container.NewCenter(ui.status),
-	)
-
-	// Create time selection container
-	timeContainer := container.NewVBox(
-		widget.NewLabel("Select Playing Time (minutes):"),
-		ui.timeSlider,
-		ui.priceLabel,
-	)
-
-	// Main content area switches between game grid and time selection
-	mainContent := container.NewStack(
-		ui.gameScroll, // Use scroll container for games
-		container.NewCenter(timeContainer),
-		container.NewCenter(ui.paymentPrompt),
-	)
-
-	ui.content = container.NewBorder(
-		header, nil, nil, nil,
-		container.NewPadded(mainContent),
-	)
+	// Create stylish header
+	ui.content = ui.createStylishHeader()
 
 	// Hide elements that aren't needed initially
 	ui.timeSlider.Hide()
+	ui.timeLabel.Hide()
 	ui.priceLabel.Hide()
 	ui.paymentPrompt.Hide()
 
@@ -375,19 +341,85 @@ func NewUI(games, cores, gamePictures map[string]string, timerChan chan int, res
 	return ui
 }
 
+// createStylishHeader creates a modern, stylish header for the UI
+func (ui *UI) createStylishHeader() *fyne.Container {
+	// Fixed title container with proper spacing
+	titleMain := canvas.NewText("SPETS", colorPrimary)
+	titleMain.TextSize = 48
+	titleMain.Alignment = fyne.TextAlignCenter
+	titleMain.TextStyle.Bold = true
+
+	titleSub := canvas.NewText(" ARCADE", colorAccent)
+	titleSub.TextSize = 48
+	titleSub.Alignment = fyne.TextAlignCenter
+	titleSub.TextStyle.Bold = true
+
+	// Proper horizontal layout for title
+	titleContainer := container.NewHBox(
+		layout.NewSpacer(),
+		titleMain,
+		titleSub,
+		layout.NewSpacer(),
+	)
+
+	// Decorative line
+	decorLine := canvas.NewRectangle(colorPrimary)
+	decorLine.Resize(fyne.NewSize(200, 2))
+
+	// Status container
+	statusContainer := container.NewCenter(ui.status)
+
+	// Header background
+	headerBg := canvas.NewRectangle(color.NRGBA{R: 0x12, G: 0x12, B: 0x12, A: 0xff})
+	headerBg.CornerRadius = 0
+
+	// Simplified header content without subtitle
+	headerContent := container.NewVBox(
+		layout.NewSpacer(),
+		titleContainer,
+		container.NewCenter(decorLine),
+		layout.NewSpacer(),
+		statusContainer,
+		layout.NewSpacer(),
+	)
+
+	header := container.NewStack(
+		headerBg,
+		container.NewPadded(headerContent),
+	)
+
+	// Time selection container with dark styling
+	timeBackground := canvas.NewRectangle(colorSurface)
+	timeBackground.CornerRadius = 8
+
+	timeContent := container.NewVBox(
+		ui.timeLabel,
+		ui.timeSlider,
+		ui.priceLabel,
+	)
+
+	timeContainer := container.NewStack(
+		timeBackground,
+		container.NewPadded(timeContent),
+	)
+
+	// Main content area
+	mainContent := container.NewStack(
+		ui.gameScroll,
+		container.NewCenter(timeContainer),
+		container.NewCenter(ui.paymentPrompt),
+	)
+
+	// Complete layout
+	return container.NewBorder(
+		header, nil, nil, nil,
+		container.NewPadded(mainContent),
+	)
+}
+
 // createGameGrid creates a responsive grid of game tiles
 func (ui *UI) createGameGrid() {
 	ui.gameTiles = make([]*GameTile, len(ui.keys))
-
-	// Calculate optimal grid columns based on screen and number of games
-	cols := 4 // Default to 4 columns like CurseForge
-	if len(ui.keys) <= 6 {
-		cols = 3
-	} else if len(ui.keys) <= 12 {
-		cols = 4
-	} else {
-		cols = 5
-	}
 
 	gridItems := make([]fyne.CanvasObject, len(ui.keys))
 
@@ -395,8 +427,8 @@ func (ui *UI) createGameGrid() {
 		// Get the image path from the gamePictures map
 		imagePath := ui.gamePictures[gameName]
 		if imagePath == "" {
-			// Fallback to a default image or create placeholder
-			imagePath = "/home/simon/Dev/ludo-spets/assets/spets/games/default.png" // Default image
+			// Fallback to a default image
+			imagePath = "/home/simon/Dev/ludo-spets/assets/spets/games/default.png"
 		}
 
 		// Create the game tile with selection callback
@@ -410,20 +442,29 @@ func (ui *UI) createGameGrid() {
 			ui.gameTiles[i].Selected = true
 		}
 
-		// Add padding around each tile for consistent spacing
-		paddedTile := container.NewPadded(ui.gameTiles[i])
-		gridItems[i] = paddedTile
+		gridItems[i] = ui.gameTiles[i]
 	}
 
-	// Create the grid layout with consistent spacing
+	// Much more columns for smaller tiles
+	cols := 8 // Increased significantly for smaller tiles
+	if len(ui.keys) <= 8 {
+		cols = 4
+	} else if len(ui.keys) <= 16 {
+		cols = 6
+	} else if len(ui.keys) <= 32 {
+		cols = 8
+	} else {
+		cols = 10
+	}
+
 	ui.gameGrid = container.New(layout.NewGridLayoutWithColumns(cols), gridItems...)
 
-	// Wrap the grid in a scroll container for better navigation
-	ui.gameScroll = container.NewScroll(ui.gameGrid)
+	// Wrap in scroll container with padding
+	scrollContent := container.NewPadded(ui.gameGrid)
+	ui.gameScroll = container.NewScroll(scrollContent)
 	ui.gameScroll.SetMinSize(fyne.NewSize(800, 600))
 }
 
-// selectGameTile updates the selected game
 func (ui *UI) selectGameTile(index int) {
 	if index < 0 || index >= len(ui.gameTiles) {
 		return
@@ -444,24 +485,25 @@ func (ui *UI) selectGameTile(index int) {
 	ui.scrollToSelectedTile()
 }
 
-// scrollToSelectedTile ensures the selected game tile is visible
 func (ui *UI) scrollToSelectedTile() {
 	if ui.selectedIdx < 0 || ui.selectedIdx >= len(ui.gameTiles) {
 		return
 	}
 
-	// Calculate the position of the selected tile
-	cols := 4
-	if len(ui.keys) <= 6 {
-		cols = 3
-	} else if len(ui.keys) <= 12 {
+	// Calculate the position of the selected tile with new grid
+	cols := 8 // Updated to match new grid
+	if len(ui.keys) <= 8 {
 		cols = 4
+	} else if len(ui.keys) <= 16 {
+		cols = 6
+	} else if len(ui.keys) <= 32 {
+		cols = 8
 	} else {
-		cols = 5
+		cols = 10
 	}
 
 	row := ui.selectedIdx / cols
-	tileHeight := float32(200) // Approximate tile height including padding
+	tileHeight := float32(120) // Adjusted for smaller tile height
 
 	// Scroll to the row containing the selected tile
 	scrollOffset := float32(row) * tileHeight
@@ -492,13 +534,15 @@ func (ui *UI) setKeyHandler() {
 			switch key.Name {
 			case fyne.KeyDown:
 				// Calculate number of columns in the grid
-				cols := 4
-				if len(ui.keys) <= 6 {
-					cols = 3
-				} else if len(ui.keys) <= 12 {
+				cols := 8 // Updated to match new grid
+				if len(ui.keys) <= 8 {
 					cols = 4
+				} else if len(ui.keys) <= 16 {
+					cols = 6
+				} else if len(ui.keys) <= 32 {
+					cols = 8
 				} else {
-					cols = 5
+					cols = 10
 				}
 
 				// Move down in the grid
@@ -507,13 +551,15 @@ func (ui *UI) setKeyHandler() {
 				}
 			case fyne.KeyUp:
 				// Calculate number of columns in the grid
-				cols := 4
-				if len(ui.keys) <= 6 {
-					cols = 3
-				} else if len(ui.keys) <= 12 {
+				cols := 8 // Updated to match new grid
+				if len(ui.keys) <= 8 {
 					cols = 4
+				} else if len(ui.keys) <= 16 {
+					cols = 6
+				} else if len(ui.keys) <= 32 {
+					cols = 8
 				} else {
-					cols = 5
+					cols = 10
 				}
 
 				// Move up in the grid
@@ -534,6 +580,7 @@ func (ui *UI) setKeyHandler() {
 				ui.stateMutex.Unlock()
 				ui.status.Text = "◄ ► ADJUST TIME    ENTER TO CONTINUE"
 				ui.gameScroll.Hide()
+				ui.timeLabel.Show()
 				ui.timeSlider.Show()
 				ui.priceLabel.Show()
 				needsRefresh = true
@@ -556,6 +603,7 @@ func (ui *UI) setKeyHandler() {
 				ui.currentState = statePayment
 				ui.stateMutex.Unlock()
 				ui.status.Text = "PRESS 'P' TO INSERT COIN AND START GAME"
+				ui.timeLabel.Hide()
 				ui.timeSlider.Hide()
 				ui.priceLabel.Hide()
 				ui.paymentPrompt.Show()
@@ -571,7 +619,7 @@ func (ui *UI) setKeyHandler() {
 				corePath := ui.cores[gameName]
 				gamePath := ui.games[gameName]
 				mins := int(ui.timeSlider.Value)
-				durationSecs := mins * 2 // Keep original logic
+				durationSecs := mins * 2
 
 				fmt.Printf("Launching: %s with core: %s for %d seconds\n", gamePath, corePath, durationSecs)
 
@@ -606,6 +654,7 @@ func (ui *UI) setKeyHandler() {
 				needsRefresh = true
 				mins := int(ui.timeSlider.Value)
 
+				ui.timeLabel.Hide()
 				ui.timeSlider.Hide()
 				ui.priceLabel.Hide()
 				ui.paymentPrompt.Hide()
@@ -639,6 +688,7 @@ func (ui *UI) HandleTimeout() {
 	ui.status.Text = "TIME OUT! ◄ ► ADJUST TIME    PRESS 'P' TO PAY AND CONTINUE"
 	ui.status.Refresh()
 	ui.gameScroll.Hide()
+	ui.timeLabel.Show()
 	ui.timeSlider.Show()
 	ui.priceLabel.Show()
 	ui.paymentPrompt.Show()

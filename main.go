@@ -30,7 +30,7 @@ func main() {
 	// Add paths to game pictures
 	gamePictures := map[string]string{
 		"Nova":            "/home/simon/Dev/ludo-spets/assets/spets/games/nova.png",
-		"Super Adventure": "/home/simon/Dev/ludo-spets/assets/spets/games/nova.png",
+		"Super Adventure": "/home/simon/Dev/ludo-spets/assets/spets/games/mario.png",
 		"Pixel Quest":     "/home/simon/Dev/ludo-spets/assets/spets/games/nova.png",
 		"Retro Hero":      "/home/simon/Dev/ludo-spets/assets/spets/games/nova.png",
 		"Classic Journey": "/home/simon/Dev/ludo-spets/assets/spets/games/nova.png",
