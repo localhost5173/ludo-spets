@@ -104,9 +104,6 @@ func (s *Server) Start(addr string) error {
 
 // launchBrowserFullscreen opens a browser in fullscreen/kiosk mode on the primary display
 func (s *Server) launchBrowserFullscreen(url string) {
-	// Close any existing browser windows first
-	s.closeBrowserWindows()
-
 	var cmd *exec.Cmd
 
 	switch runtime.GOOS {
@@ -155,50 +152,6 @@ func (s *Server) launchBrowserFullscreen(url string) {
 	} else {
 		log.Println("Could not find a suitable browser to launch")
 	}
-}
-
-// closeBrowserWindows closes all browser windows
-func (s *Server) closeBrowserWindows() {
-	log.Println("Closing all browser windows...")
-
-	// Try using command-line tools first for graceful termination
-	switch runtime.GOOS {
-	case "linux":
-		closeCmds := []string{
-			"wmctrl -c 'SPETS ARCADE'",
-			"wmctrl -c 'Chrome'",
-			"wmctrl -c 'Google Chrome'",
-			"pkill -f 'chrome.*localhost:8080'",
-			"pkill -f 'chromium.*localhost:8080'",
-		}
-
-		for _, cmdStr := range closeCmds {
-			exec.Command("bash", "-c", cmdStr).Run()
-		}
-
-	case "darwin":
-		exec.Command("osascript", "-e", `tell application "Google Chrome" to quit`).Run()
-		exec.Command("osascript", "-e", `tell application "Chrome" to quit`).Run()
-
-	case "windows":
-		exec.Command("taskkill", "/F", "/IM", "chrome.exe").Run()
-	}
-
-	// Then terminate our tracked processes
-	if s.browserCmd != nil && s.browserCmd.Process != nil {
-		s.browserCmd.Process.Kill()
-		s.browserCmd = nil
-	}
-
-	// Also kill any previously tracked browser processes
-	for _, cmd := range s.previousBrowsers {
-		if cmd != nil && cmd.Process != nil {
-			cmd.Process.Kill()
-		}
-	}
-
-	// Clear the array
-	s.previousBrowsers = nil
 }
 
 // handleGames returns the list of available games
@@ -268,56 +221,94 @@ func (s *Server) LaunchGame(gameName string, minutes int) {
 			s.SetState(StateSelectGame)
 			return
 		}
-
-		// Wait for game loaded confirmation or timeout
-		select {
-		case <-s.gameLoadedChan:
-			log.Println("Game loaded successfully, closing browser")
-			s.closeBrowserWindows()
-		case <-time.After(10 * time.Second):
-			log.Println("Timeout waiting for game to load, closing browser anyway")
-			s.closeBrowserWindows()
-		}
 	}()
 }
 
 // OnGameLoaded should be called when Ludo has successfully loaded the game
 func (s *Server) OnGameLoaded() {
 	log.Println("Server: Game loaded confirmation received")
+
+	// Set game active state first
+	s.SetState(StateGameActive)
+
+	// Send message to browser to indicate game is running
+	msg := Message{
+		Type: "game_started",
+		Payload: map[string]interface{}{
+			"message": "Game loaded successfully, game is now active",
+		},
+	}
+
+	jsonMsg, _ := json.Marshal(msg)
+	s.hub.broadcast <- jsonMsg
+
+	// Let the game channel know we received the signal
 	select {
 	case s.gameLoadedChan <- true:
 	default:
 		// Channel is full, ignore
 	}
+
+	// Minimize the browser window (don't close it)
+	s.minimizeBrowser()
 }
 
-// PrepareTimeout opens a browser window in preparation for timeout (called ~10 seconds before)
-func (s *Server) PrepareTimeout() {
-	log.Println("Preparing for timeout - opening browser window")
-	
-	// Close any existing browser windows first
-	s.closeBrowserWindows()
-	
-	// Launch a new browser window but keep it in background
-	url := "http://localhost:8080"
-	s.launchBrowserFullscreen(url)
-	
-	// Give the browser time to fully load
-	time.Sleep(2 * time.Second)
+// minimizeBrowser attempts to minimize the browser window instead of closing it
+func (s *Server) minimizeBrowser() {
+	log.Println("Attempting to minimize browser window")
+
+	switch runtime.GOOS {
+	case "linux":
+		// Try wmctrl to minimize
+		if _, err := exec.LookPath("wmctrl"); err == nil {
+			exec.Command("bash", "-c", "wmctrl -r 'SPETS ARCADE' -b add,shaded").Run()
+			exec.Command("bash", "-c", "wmctrl -r 'Chrome' -b add,shaded").Run()
+			exec.Command("bash", "-c", "wmctrl -r 'Google Chrome' -b add,shaded").Run()
+		}
+
+		// Try xdotool as well
+		if _, err := exec.LookPath("xdotool"); err == nil {
+			exec.Command("bash", "-c", "xdotool search --name 'Chrome' windowminimize").Run()
+			exec.Command("bash", "-c", "xdotool search --name 'Google Chrome' windowminimize").Run()
+			exec.Command("bash", "-c", "xdotool search --name 'SPETS ARCADE' windowminimize").Run()
+		}
+	case "darwin":
+		// Minimize via AppleScript
+		exec.Command("osascript", "-e", `tell application "Google Chrome" to set miniaturized of every window to true`).Run()
+	case "windows":
+		// Minimize via PowerShell
+		exec.Command("powershell", "-Command", `
+			$chrome = Get-Process chrome -ErrorAction SilentlyContinue
+			if ($chrome) {
+				Add-Type @"
+				using System;
+				using System.Runtime.InteropServices;
+				public class Window {
+					[DllImport("user32.dll")]
+					[return: MarshalAs(UnmanagedType.Bool)]
+					public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+				}
+"@
+				$handle = $chrome.MainWindowHandle
+				if ($handle -ne [IntPtr]::Zero) {
+					[Window]::ShowWindow($handle, 6) # 6 = SW_MINIMIZE
+				}
+			}
+		`).Run()
+	}
 }
 
 // HandleTimeout is called when the game timer expires
 func (s *Server) HandleTimeout() {
-	// Read up to 4 more values from the channel for window positioning
+	// Read window positioning information
 	var x, y, width, height int
 
-	// Use select with short timeout to avoid blocking if the values aren't available
+	// Use select with short timeout to avoid blocking if values aren't available
 	timeout := time.After(100 * time.Millisecond)
 
 	// Try to read X position
 	select {
 	case x = <-s.timerChan:
-		// Successfully read X position
 	case <-timeout:
 		log.Println("Timeout reading game window X position")
 		x = 0
@@ -326,7 +317,6 @@ func (s *Server) HandleTimeout() {
 	// Try to read Y position
 	select {
 	case y = <-s.timerChan:
-		// Successfully read Y position
 	case <-timeout:
 		log.Println("Timeout reading game window Y position")
 		y = 0
@@ -335,7 +325,6 @@ func (s *Server) HandleTimeout() {
 	// Try to read width
 	select {
 	case width = <-s.timerChan:
-		// Successfully read width
 	case <-timeout:
 		log.Println("Timeout reading game window width")
 		width = 800
@@ -344,7 +333,6 @@ func (s *Server) HandleTimeout() {
 	// Try to read height
 	select {
 	case height = <-s.timerChan:
-		// Successfully read height
 	case <-timeout:
 		log.Println("Timeout reading game window height")
 		height = 600
@@ -358,32 +346,46 @@ func (s *Server) HandleTimeout() {
 	s.gameWindowHeight = height
 	s.gameWindowMutex.Unlock()
 
-	// First launch a new browser window since the previous one was closed
-	log.Println("Timeout occurred, launching a new browser window")
-	url := "http://localhost:8080"
-	s.launchBrowserFullscreen(url)
-	
-	// Give the browser window a moment to fully load before changing state
-	// and trying to interact with it
-	time.Sleep(500 * time.Millisecond)
-	
-	// Now that the browser is launched, change state to extend time
-	// This will trigger the UI updates in the browser
+	log.Println("Timeout occurred, bringing browser to foreground and showing timeout UI")
+
+	// IMPORTANT: Force the state change and ensure it's broadcast
+	log.Printf("Current state before timeout: %v", s.GetState())
 	s.SetState(StateExtendTime)
+	log.Printf("State after timeout: %v", s.GetState())
+
+	// Give a moment for the state to be processed
+	time.Sleep(100 * time.Millisecond)
 
 	// Send window position to clients
 	s.broadcastWindowPosition()
 
-	// Try to force the browser window to the foreground
-	log.Println("Bringing browser window to foreground for timeout screen")
-	time.Sleep(200 * time.Millisecond) // Give window a moment to initialize
+	// Bring browser to foreground
 	s.forceBrowserToForeground()
-	
+
 	// Additional attempt to force focus with a slight delay
 	time.AfterFunc(1*time.Second, func() {
 		log.Println("Making additional attempt to focus browser window")
 		s.forceBrowserToForeground()
 	})
+}
+
+// PrepareTimeout just ensures browser is ready (no closing/opening)
+func (s *Server) PrepareTimeout() {
+	log.Println("Preparing for timeout - ensuring browser is ready")
+	
+	// Just bring browser to foreground if it exists
+	s.forceBrowserToForeground()
+	
+	// Send a message to prepare the browser for timeout
+	msg := Message{
+		Type: "prepare_timeout",
+		Payload: map[string]interface{}{
+			"message": "Game will pause in 10 seconds",
+		},
+	}
+	
+	jsonMsg, _ := json.Marshal(msg)
+	s.hub.broadcast <- jsonMsg
 }
 
 // forceBrowserToForeground brings the browser window to the foreground
@@ -395,7 +397,7 @@ func (s *Server) forceBrowserToForeground() {
 		if _, err := exec.LookPath("wmctrl"); err == nil {
 			// Try multiple window title variations
 			titles := []string{"SPETS ARCADE", "SPETS ARCADE - TIMEOUT OVERLAY", "Google Chrome", "Chrome"}
-			
+
 			for _, title := range titles {
 				cmd = exec.Command("wmctrl", "-a", title)
 				log.Printf("Trying to focus window with title: %s", title)
@@ -405,45 +407,21 @@ func (s *Server) forceBrowserToForeground() {
 					return
 				}
 			}
-			
+
 			// If specific titles fail, try a more general approach
 			generalCmd := exec.Command("bash", "-c", "wmctrl -a Chrome || wmctrl -a Firefox || wmctrl -R localhost:8080")
 			if err := generalCmd.Run(); err != nil {
 				log.Printf("Failed to focus any browser window: %v", err)
 			}
 		}
-	case "darwin":
-		cmd = exec.Command("osascript", "-e", `tell application "Google Chrome" to activate`)
-	case "windows":
-		ps := `
-        Add-Type @"
-        using System;
-        using System.Runtime.InteropServices;
-        public class WindowHelper {
-            [DllImport("user32.dll")]
-            [return: MarshalAs(UnmanagedType.Bool)]
-            public static extern bool SetForegroundWindow(IntPtr hWnd);
-            
-            [DllImport("user32.dll")]
-            public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
-        }
-"@
-        $chromeWindow = [WindowHelper]::FindWindow("Chrome_WidgetWin_1", $null)
-        if ($chromeWindow -ne [IntPtr]::Zero) {
-            [WindowHelper]::SetForegroundWindow($chromeWindow)
-        }
-        `
-		cmd = exec.Command("powershell", "-Command", ps)
-	}
 
-	if cmd != nil {
-		log.Printf("Executing browser focus command: %s", cmd.String())
-		err := cmd.Run()
-		if err != nil {
-			log.Printf("Failed to bring browser to foreground: %v", err)
-		} else {
-			log.Printf("Successfully brought browser to foreground")
+		// Also try xdotool approach as a backup
+		if _, err := exec.LookPath("xdotool"); err == nil {
+			exec.Command("bash", "-c", "xdotool search --name 'Chrome' windowactivate").Run()
+			exec.Command("bash", "-c", "xdotool search --name 'Google Chrome' windowactivate").Run()
+			exec.Command("bash", "-c", "xdotool search --name 'SPETS ARCADE' windowactivate").Run()
 		}
+	// ...existing code for other platforms...
 	}
 }
 

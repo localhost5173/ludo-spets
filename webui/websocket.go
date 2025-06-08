@@ -204,7 +204,6 @@ func (c *Client) handleMessage(msg Message) {
 			c.hub.server.LaunchGame(paymentData.GameName, paymentData.Minutes)
 		} else if currentState == StateExtendPayment || currentState == StateExtendTime {
 			// Accept payment in either ExtendTime or ExtendPayment state
-			// This helps overcome any state synchronization issues
 			log.Printf("Processing time extension payment in state: %v", currentState)
 			
 			// Convert minutes to seconds (multiply by 2 for testing)
@@ -223,9 +222,9 @@ func (c *Client) handleMessage(msg Message) {
 			// Wait a bit more to ensure signals are processed
 			time.Sleep(100 * time.Millisecond)
 			
-			// Now close the browser windows to return focus to the game
-			log.Printf("Closing browser window...")
-			c.hub.server.closeBrowserWindows()
+			 // IMPORTANT: Do NOT close the browser - just minimize it
+			log.Printf("Minimizing browser window...")
+			c.hub.server.minimizeBrowser()
 			
 			// Set state to GameActive as the game should be running
 			log.Printf("Setting state to GameActive")
@@ -238,14 +237,9 @@ func (c *Client) handleMessage(msg Message) {
 		// Handle player choosing to quit the game
 		if c.hub.server.GetState() == StateExtendTime {
 			log.Println("Player chose to quit game")
-			c.hub.server.closeBrowserWindows()
+			// IMPORTANT: Do NOT close the browser
+			// Just go back to game selection state
 			c.hub.server.SetState(StateSelectGame)
-			
-			// Launch a new browser window for game selection
-			time.AfterFunc(500*time.Millisecond, func() {
-				url := "http://localhost:8080"
-				c.hub.server.launchBrowserFullscreen(url)
-			})
 		}
 	}
 }

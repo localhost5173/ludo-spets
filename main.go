@@ -55,10 +55,6 @@ func main() {
 					// Timer expired, tell the server to handle it
 					fmt.Println("Main: Received timer expired signal (-1)")
 					server.HandleTimeout()
-				} else if signal == -2 {
-					// Prepare timeout - open browser window but don't show timeout UI yet
-					fmt.Println("Main: Received prepare timeout signal (-2)")
-					server.PrepareTimeout()
 				} else if signal == -999 {
 					// Special signal indicating game is loaded
 					fmt.Println("Main: Received game loaded signal")
