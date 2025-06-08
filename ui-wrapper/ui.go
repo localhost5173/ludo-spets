@@ -137,23 +137,23 @@ func (g *GameTile) CreateRenderer() fyne.WidgetRenderer {
 	hoverOverlay.CornerRadius = 6
 	hoverOverlay.Hide()
 
-	// Create the game image (much smaller)
+	// Create the game image (much larger proportion)
 	image := canvas.NewImageFromFile(g.ImagePath)
 	image.FillMode = canvas.ImageFillContain
 
-	// Create game name label (much bigger and more readable)
+	// Create game name label (smaller to give more space to image)
 	nameLabel := canvas.NewText(g.Name, colorOnSurface)
-	nameLabel.TextSize = 14 // Bigger relative to the smaller tile
+	nameLabel.TextSize = 12
 	nameLabel.Alignment = fyne.TextAlignCenter
 	nameLabel.TextStyle.Bold = true
 
-	// Create compact image container
+	// Create image container that takes up most of the space
 	imageContainer := container.NewPadded(image)
 
-	// Create name container with proper spacing
+	// Create name container with minimal spacing
 	nameContainer := container.NewCenter(nameLabel)
 
-	// Create layout optimized for smaller tiles
+	// Create layout with larger image area and smaller text area
 	content := container.NewBorder(
 		nil, nameContainer, nil, nil,
 		imageContainer,
@@ -199,8 +199,8 @@ func (r *gameTileRenderer) Layout(size fyne.Size) {
 }
 
 func (r *gameTileRenderer) MinSize() fyne.Size {
-	// Much smaller tiles - 1/4 of original size: 80px width, 100px height
-	return fyne.NewSize(80, 100)
+	// More square tiles - 100x100 for a nearly square appearance
+	return fyne.NewSize(100, 100)
 }
 
 func (r *gameTileRenderer) Objects() []fyne.CanvasObject {
@@ -403,9 +403,11 @@ func (ui *UI) createStylishHeader() *fyne.Container {
 		container.NewPadded(timeContent),
 	)
 
-	// Main content area
+	// Main content area - wrap gameScroll in a Center container to prevent stretching
+	centeredGameScroll := container.NewCenter(ui.gameScroll)
+
 	mainContent := container.NewStack(
-		ui.gameScroll,
+		centeredGameScroll,
 		container.NewCenter(timeContainer),
 		container.NewCenter(ui.paymentPrompt),
 	)
@@ -417,10 +419,9 @@ func (ui *UI) createStylishHeader() *fyne.Container {
 	)
 }
 
-// createGameGrid creates a responsive grid of game tiles
+// createGameGrid creates a fixed 8x4 grid of game tiles
 func (ui *UI) createGameGrid() {
 	ui.gameTiles = make([]*GameTile, len(ui.keys))
-
 	gridItems := make([]fyne.CanvasObject, len(ui.keys))
 
 	for i, gameName := range ui.keys {
@@ -445,24 +446,25 @@ func (ui *UI) createGameGrid() {
 		gridItems[i] = ui.gameTiles[i]
 	}
 
-	// Much more columns for smaller tiles
-	cols := 8 // Increased significantly for smaller tiles
-	if len(ui.keys) <= 8 {
-		cols = 4
-	} else if len(ui.keys) <= 16 {
-		cols = 6
-	} else if len(ui.keys) <= 32 {
-		cols = 8
-	} else {
-		cols = 10
-	}
+	// Always use 8 columns
+	ui.gameGrid = container.New(layout.NewGridLayoutWithColumns(8), gridItems...)
 
-	ui.gameGrid = container.New(layout.NewGridLayoutWithColumns(cols), gridItems...)
+	// Create a fixed-size container for the grid that will show exactly 8x4 tiles
+	paddedGrid := container.NewPadded(ui.gameGrid)
 
-	// Wrap in scroll container with padding
-	scrollContent := container.NewPadded(ui.gameGrid)
-	ui.gameScroll = container.NewScroll(scrollContent)
-	ui.gameScroll.SetMinSize(fyne.NewSize(800, 600))
+	// Use a VBox with spacer to ensure grid doesn't stretch if fewer than 4 rows
+	gridContainer := container.NewVBox(paddedGrid, layout.NewSpacer())
+
+	// Create scroll container with fixed size for 8x4 grid
+	ui.gameScroll = container.NewScroll(gridContainer)
+
+	// Calculate size for 8x4 grid of 100x100 tiles with padding
+	// 8 tiles * 100px + 7 spaces * theme.Padding() + 2 * theme.Padding() (for container padding)
+	gridWidth := 8*100 + 7*theme.Padding() + 2*theme.Padding()
+	// 4 tiles * 100px + 3 spaces * theme.Padding() + 2 * theme.Padding() (for container padding)
+	gridHeight := 4*100 + 3*theme.Padding() + 2*theme.Padding()
+
+	ui.gameScroll.SetMinSize(fyne.NewSize(gridWidth, gridHeight))
 }
 
 func (ui *UI) selectGameTile(index int) {
@@ -490,27 +492,23 @@ func (ui *UI) scrollToSelectedTile() {
 		return
 	}
 
-	// Calculate the position of the selected tile with new grid
-	cols := 8 // Updated to match new grid
-	if len(ui.keys) <= 8 {
-		cols = 4
-	} else if len(ui.keys) <= 16 {
-		cols = 6
-	} else if len(ui.keys) <= 32 {
-		cols = 8
-	} else {
-		cols = 10
-	}
-
+	// Always use 8 columns
+	cols := 8
 	row := ui.selectedIdx / cols
-	tileHeight := float32(120) // Adjusted for smaller tile height
 
-	// Scroll to the row containing the selected tile
+	// Calculate tile height including spacing (100px tile + theme.Padding())
+	tileHeight := float32(100 + theme.Padding())
+
+	// Calculate scroll offset to show the selected row
+	// Include the top padding of the container
 	scrollOffset := float32(row) * tileHeight
-	ui.gameScroll.ScrollToTop()
+
+	// Only scroll if needed
 	if scrollOffset > 0 {
 		ui.gameScroll.Offset = fyne.NewPos(0, scrollOffset)
 		ui.gameScroll.Refresh()
+	} else {
+		ui.gameScroll.ScrollToTop()
 	}
 }
 
@@ -533,34 +531,16 @@ func (ui *UI) setKeyHandler() {
 		case stateSelectGame:
 			switch key.Name {
 			case fyne.KeyDown:
-				// Calculate number of columns in the grid
-				cols := 8 // Updated to match new grid
-				if len(ui.keys) <= 8 {
-					cols = 4
-				} else if len(ui.keys) <= 16 {
-					cols = 6
-				} else if len(ui.keys) <= 32 {
-					cols = 8
-				} else {
-					cols = 10
-				}
+				// Always use 8 columns
+				cols := 8
 
 				// Move down in the grid
 				if ui.selectedIdx+cols < len(ui.keys) {
 					ui.selectGameTile(ui.selectedIdx + cols)
 				}
 			case fyne.KeyUp:
-				// Calculate number of columns in the grid
-				cols := 8 // Updated to match new grid
-				if len(ui.keys) <= 8 {
-					cols = 4
-				} else if len(ui.keys) <= 16 {
-					cols = 6
-				} else if len(ui.keys) <= 32 {
-					cols = 8
-				} else {
-					cols = 10
-				}
+				// Always use 8 columns
+				cols := 8
 
 				// Move up in the grid
 				if ui.selectedIdx-cols >= 0 {

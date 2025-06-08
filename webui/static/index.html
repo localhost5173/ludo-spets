@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SPETS ARCADE</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header>
+            <div class="title-container">
+                <h1><span class="title-main">SPETS</span><span class="title-sub"> ARCADE</span></h1>
+                <div class="decor-line"></div>
+            </div>
+            <div class="status-container">
+                <p id="status-text">◄ ► ▲ ▼ NAVIGATE    ENTER TO CONTINUE</p>
+            </div>
+        </header>
+
+        <!-- Main Content Area -->
+        <main>
+            <!-- Game Selection Grid with fixed size -->
+            <div class="game-grid-container">
+                <div id="game-grid" class="game-grid">
+                    <!-- Games will be populated here by JavaScript -->
+                </div>
+            </div>
+
+            <!-- Time Selection -->
+            <div id="time-selection" class="time-selection hidden">
+                <h2>Select Playing Time (minutes):</h2>
+                <div class="slider-container">
+                    <input type="range" id="time-slider" min="1" max="60" value="5" step="1">
+                    <div class="slider-labels">
+                        <span>1</span>
+                        <span>15</span>
+                        <span>30</span>
+                        <span>45</span>
+                        <span>60</span>
+                    </div>
+                </div>
+                <p id="price-label">TOTAL COST: $2.50 (5 minutes)</p>
+            </div>
+
+            <!-- Payment Prompt -->
+            <div id="payment-prompt" class="payment-prompt hidden">
+                <p>PRESS 'P' TO INSERT COIN</p>
+            </div>
+        </main>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

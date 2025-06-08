@@ -17,6 +17,8 @@ require (
 	golang.org/x/mobile v0.0.0-20250305212854-3a7bc9f8a4de
 )
 
+require github.com/gorilla/websocket v1.5.3 // indirect
+
 require (
 	fyne.io/fyne v1.4.3
 	fyne.io/fyne/v2 v2.6.1 // indirect

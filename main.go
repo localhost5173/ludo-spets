@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/libretro/ludo/ui-wrapper"
+	"github.com/libretro/ludo/webui"
 )
 
 func main() {
@@ -37,12 +37,12 @@ func main() {
 		// Add corresponding picture paths here
 	}
 
-	// Channels for communication between Fyne UI and game logic
+	// Channels for communication between Web UI and game logic
 	timerChan := make(chan int, 10)
 	resumeChan := make(chan bool, 10)
 
-	// Create the UI instance
-	appUI := ui.NewUI(games, cores, gamePictures, timerChan, resumeChan)
+	// Create the web server
+	server := webui.NewServer(games, cores, gamePictures, timerChan, resumeChan)
 
 	// Monitor timer events using a ticker
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -52,9 +52,9 @@ func main() {
 			select {
 			case signal := <-timerChan:
 				if signal == -1 {
-					// Timer expired, tell the UI to handle it
+					// Timer expired, tell the server to handle it
 					fmt.Println("Main: Received timer expired signal (-1)")
-					appUI.HandleTimeout()
+					server.HandleTimeout()
 				}
 			default:
 				// No signal, continue
@@ -62,6 +62,8 @@ func main() {
 		}
 	}()
 
-	// Run the UI
-	appUI.Run()
+	// Start the web server on port 8080 - this will also launch the browser
+	if err := server.Start(":8080"); err != nil {
+		fmt.Printf("Failed to start web server: %v\n", err)
+	}
 }

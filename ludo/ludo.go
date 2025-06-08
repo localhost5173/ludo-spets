@@ -125,6 +125,10 @@ func runLoop(vid *video.Video, m *menu.Menu) {
 // RunGame launches the given core+game and shows a "TIME LEFT: mm:ss" overlay
 // in the top-right corner of the Ludo window. When countdown hits zero, window is paused automatically.
 func RunGame(corePath, gamePath string, durationSeconds int, timerChan chan int, resumeChan chan bool) error {
+	// Ensure we're running on a locked OS thread
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	// Load settings, init, etc.
 	err := settings.Load()
 	if err != nil {
@@ -133,6 +137,7 @@ func RunGame(corePath, gamePath string, durationSeconds int, timerChan chan int,
 	}
 
 	// Initialize GLFW since we need it for the game window
+	// GLFW must be initialized from the same thread that will later process its events
 	if err := glfw.Init(); err != nil {
 		return fmt.Errorf("failed to initialize glfw: %w", err)
 	}
@@ -153,14 +158,17 @@ func RunGame(corePath, gamePath string, durationSeconds int, timerChan chan int,
 	vid.Window.Show()
 	vid.Window.Focus()
 	
+	// Initialize audio after video to ensure proper context
 	audio.Init()
 	m := menu.Init(vid)
 	core.Init(vid)
 	input.Init(vid)
 
+	// Load core and game with improved error handling
 	if err := core.Load(corePath); err != nil {
 		return fmt.Errorf("failed to load core: %w", err)
 	}
+	
 	if err := core.LoadGame(gamePath); err != nil {
 		ntf.DisplayAndLog(ntf.Error, "Menu", err.Error())
 		return fmt.Errorf("failed to load game: %w", err)
@@ -176,49 +184,69 @@ func RunGame(corePath, gamePath string, durationSeconds int, timerChan chan int,
 	globalTimerOverlay.visible = true
 	globalTimerOverlay.mu.Unlock()
 
-	// Timer management goroutine
+	// Create a done channel to signal when timer goroutine should exit
+	doneChan := make(chan struct{})
+	
+	// Timer management goroutine with cancellation support
 	go func() {
 		remaining := durationSeconds
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		
 		for {
-			if remaining <= 0 {
-				time.Sleep(1000 * time.Millisecond) // Give some time for the UI to update
-				 // Signal timeout to Fyne UI first (so window appears)
-				globalTimerOverlay.mu.Lock()
-				globalTimerOverlay.remaining = 0
-				globalTimerOverlay.mu.Unlock()
-				timerChan <- -1 // Signal timeout to Fyne UI
+			select {
+			case <-doneChan:
+				// Exit the goroutine when signaled
+				return
 				
-				// Wait 2 seconds before actually pausing the game
-				time.Sleep(2000 * time.Millisecond)
-				
-				// Now pause the game
-				state.MenuActive = true
-
-				// Wait for resume signal and new duration
-				<-resumeChan     // Wait for resume signal
-				newDuration := <-timerChan // Get new timer duration
-				remaining = newDuration
-				state.MenuActive = false // Resume the game
-
-				// Update overlay
+			case <-ticker.C:
+				remaining--
 				globalTimerOverlay.mu.Lock()
 				globalTimerOverlay.remaining = remaining
 				globalTimerOverlay.mu.Unlock()
-
-				// Bring the Ludo window to the foreground
-				vid.Window.Show()
-				vid.Window.Focus()
-			} else {
-				select {
-				case newDuration := <-timerChan:
-					if newDuration > 0 {
-						remaining = newDuration
-						globalTimerOverlay.mu.Lock()
-						globalTimerOverlay.remaining = remaining
-						globalTimerOverlay.mu.Unlock()
-					}
-				case <-time.After(time.Second):
-					remaining--
+				
+				if remaining <= 0 {
+					 // When time runs out, send game window information along with timeout signal
+					// This will allow the web UI to position itself over the game window
+					
+					// Get window position and size
+					var xpos, ypos, width, height int
+					xpos, ypos = vid.Window.GetPos()
+					width, height = vid.Window.GetSize()
+					
+					// Signal timeout to UI with window information
+					timerChan <- -1 // -1 is the timeout signal
+					
+					// Send window information through the same channel
+					// Pack window info as: x, y, width, height
+					timerChan <- xpos
+					timerChan <- ypos
+					timerChan <- width
+					timerChan <- height
+					
+					// Pause the game but keep window visible
+					state.MenuActive = true
+					
+					// Wait for resume signal
+					<-resumeChan
+					
+					// Get new duration
+					newDuration := <-timerChan
+					remaining = newDuration
+					
+					// Update overlay
+					globalTimerOverlay.mu.Lock()
+					globalTimerOverlay.remaining = remaining
+					globalTimerOverlay.mu.Unlock()
+					
+					// Resume game and ensure focus
+					state.MenuActive = false
+					vid.Window.Focus()
+				}
+				
+			case newDuration := <-timerChan:
+				if newDuration > 0 {
+					remaining = newDuration
 					globalTimerOverlay.mu.Lock()
 					globalTimerOverlay.remaining = remaining
 					globalTimerOverlay.mu.Unlock()
@@ -235,7 +263,21 @@ func RunGame(corePath, gamePath string, durationSeconds int, timerChan chan int,
 	vid.Window.Focus()
 	
 	log.Println("Starting game loop...")
+	
+	// Run the game loop with error handling
+	defer func() {
+		// Signal timer goroutine to exit
+		close(doneChan)
+		
+		// Ensure core is unloaded properly
+		core.Unload()
+		
+		// Handle any panic
+		if r := recover(); r != nil {
+			log.Printf("Recovered from panic in game loop: %v", r)
+		}
+	}()
+	
 	runLoop(vid, m)
-	core.Unload()
 	return nil
 }

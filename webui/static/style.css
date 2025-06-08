@@ -1,0 +1,338 @@
+:root {
+    --color-primary: #cf2e2e;
+    --color-accent: #fecda5;
+    --color-background: #0f0f0f;
+    --color-surface: #1a1a1a;
+    --color-on-surface: #e0e0e0;
+    --color-border: #2d2d2d;
+    --color-shadow: rgba(0, 0, 0, 0.4);
+    --color-hover: rgba(255, 255, 255, 0.08);
+    --tile-size: 150px;
+    --tile-spacing: 10px;
+    --theme-padding: 8px;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    background-color: var(--color-background);
+    color: var(--color-on-surface);
+    height: 100vh;
+    overflow: hidden;
+}
+
+.app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+/* Header Styles */
+header {
+    background-color: #121212;
+    padding: 1.5rem 0;
+    text-align: center;
+}
+
+.title-container {
+    margin-bottom: 1rem;
+}
+
+h1 {
+    font-size: 2.5rem;
+    font-weight: bold;
+}
+
+.title-main {
+    color: var(--color-primary);
+}
+
+.title-sub {
+    color: var(--color-accent);
+}
+
+.decor-line {
+    width: 200px;
+    height: 2px;
+    background-color: var(--color-primary);
+    margin: 0.5rem auto;
+}
+
+.status-container {
+    font-size: 1.1rem;
+    padding: 0.5rem 0;
+}
+
+/* Main Content Area */
+main {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    padding: 1rem;
+    overflow: hidden;
+}
+
+/* Game Grid Container - Fixed size to match Fyne 8x4 grid */
+.game-grid-container {
+    /* Calculate width for 8 columns of tiles with spacing */
+    width: calc(8 * var(--tile-size) + 7 * var(--tile-spacing) + 2 * var(--theme-padding));
+    /* Calculate height for 4 rows of tiles with spacing */
+    height: calc(4 * var(--tile-size) + 3 * var(--tile-spacing) + 2 * var(--theme-padding));
+    overflow: auto;
+    background-color: var(--color-background);
+    border-radius: 8px;
+    padding: var(--theme-padding);
+}
+
+/* Game Grid */
+.game-grid {
+    display: grid;
+    grid-template-columns: repeat(8, var(--tile-size));
+    gap: var(--tile-spacing);
+    justify-content: start;
+    align-content: start;
+}
+
+/* Game Tile - Fixed size exactly as in Fyne */
+.game-tile {
+    width: var(--tile-size);
+    height: var(--tile-size);
+    background-color: var(--color-surface);
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+    cursor: pointer;
+    box-shadow: 3px 3px 5px var(--color-shadow);
+    transition: transform 0.15s ease;
+}
+
+.game-tile:hover {
+    transform: scale(1.03);
+}
+
+.game-tile.selected {
+    box-shadow: 0 0 0 2px var(--color-primary);
+}
+
+.game-tile-image {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 0.5rem;
+}
+
+.game-tile-image img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.game-tile-name {
+    font-size: 0.8rem;
+    font-weight: bold;
+    text-align: center;
+    padding: 0.5rem;
+    background-color: var(--color-surface);
+}
+
+/* Time Selection */
+.time-selection {
+    position: absolute;
+    z-index: 10;
+    background-color: var(--color-surface);
+    padding: 2rem;
+    border-radius: 8px;
+    text-align: center;
+    width: 80%;
+    max-width: 600px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+}
+
+.time-selection h2 {
+    margin-bottom: 1rem;
+    font-weight: bold;
+}
+
+.slider-container {
+    margin: 2rem 0;
+}
+
+#time-slider {
+    width: 100%;
+    -webkit-appearance: none;
+    height: 8px;
+    border-radius: 4px;
+    background: var(--color-border);
+    outline: none;
+}
+
+#time-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--color-primary);
+    cursor: pointer;
+}
+
+.slider-labels {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.5rem;
+}
+
+#price-label {
+    font-size: 1.5rem;
+    margin-top: 1rem;
+    color: var(--color-accent);
+}
+
+/* Payment Prompt */
+.payment-prompt {
+    position: absolute;
+    z-index: 10;
+    background-color: var(--color-surface);
+    padding: 2rem;
+    border-radius: 8px;
+    text-align: center;
+    width: 80%;
+    max-width: 600px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+    border: 2px solid var(--color-primary);
+}
+
+.payment-prompt p {
+    font-size: 1.8rem;
+    color: var(--color-primary);
+    font-weight: bold;
+}
+
+/* Game Overlay for timeout */
+#game-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.9);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 999999; /* Extremely high z-index to be above everything */
+    backdrop-filter: blur(5px); /* Add blur effect for modern browsers */
+    -webkit-backdrop-filter: blur(5px);
+}
+
+#timeout-message {
+    color: var(--color-primary);
+    font-size: 4rem;
+    margin-bottom: 2rem;
+    text-shadow: 0 0 20px rgba(255, 0, 0, 0.7);
+    animation: pulse 1s infinite ease-in-out;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+
+#timeout-instructions {
+    color: var(--color-accent);
+    font-size: 1.5rem;
+    margin-bottom: 2rem;
+    text-shadow: 0 0 10px rgba(255, 165, 0, 0.5);
+    padding: 0.8rem;
+    border-radius: 4px;
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+/* Time Selection in overlay */
+#game-overlay .time-selection {
+    background-color: var(--color-surface);
+    padding: 2rem;
+    border-radius: 8px;
+    width: 80%;
+    max-width: 600px;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.7);
+}
+
+/* Add styling for step indicators */
+.step-indicator {
+    display: inline-block;
+    background-color: var(--color-primary);
+    color: white;
+    font-weight: bold;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    margin-right: 0.5rem;
+}
+
+/* Add styling for a progress indicator */
+.steps-progress {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 1.5rem;
+}
+
+.step {
+    width: 40px;
+    height: 6px;
+    background-color: rgba(255, 255, 255, 0.3);
+    margin: 0 5px;
+    border-radius: 3px;
+}
+
+.step.active {
+    background-color: var(--color-primary);
+}
+
+/* Utility Classes */
+.hidden {
+    display: none;
+}
+
+/* Focus styling for keyboard navigation */
+.focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+}
+
+/* Add scrollbar styling to match Fyne look */
+.game-grid-container::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+.game-grid-container::-webkit-scrollbar-track {
+    background: var(--color-background);
+    border-radius: 5px;
+}
+
+.game-grid-container::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 5px;
+}
+
+.game-grid-container::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
