@@ -2,12 +2,29 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/libretro/ludo/webui"
 )
 
 func main() {
+	// Determine the appropriate cores directory based on architecture
+	var coresDir string
+	switch runtime.GOARCH {
+	case "amd64", "386":
+		coresDir = "cores/x86"
+		fmt.Println("Detected x86 architecture, using cores from:", coresDir)
+	case "arm64", "arm":
+		coresDir = "cores/arm64"
+		fmt.Println("Detected ARM architecture, using cores from:", coresDir)
+	default:
+		// Default to a generic cores directory if architecture is unknown
+		coresDir = "cores"
+		fmt.Printf("Using default cores directory for architecture: %s\n", runtime.GOARCH)
+	}
+
 	// ==============================
 	// 1) Prepare your game‐core map
 	// ==============================
@@ -19,14 +36,17 @@ func main() {
 		"Classic Journey": "games/nova.nes",
 		// Add more games here
 	}
+
+	// Build core paths using the determined cores directory
 	cores := map[string]string{
-		"Nova":            "cores/nestopia_libretro.so",
-		"Super Adventure": "cores/nestopia_libretro.so",
-		"Pixel Quest":     "cores/nestopia_libretro.so",
-		"Retro Hero":      "cores/nestopia_libretro.so",
-		"Classic Journey": "cores/nestopia_libretro.so",
+		"Nova":            filepath.Join(coresDir, "nestopia_libretro.so"),
+		"Super Adventure": filepath.Join(coresDir, "nestopia_libretro.so"),
+		"Pixel Quest":     filepath.Join(coresDir, "nestopia_libretro.so"),
+		"Retro Hero":      filepath.Join(coresDir, "nestopia_libretro.so"),
+		"Classic Journey": filepath.Join(coresDir, "nestopia_libretro.so"),
 		// Add corresponding cores here
 	}
+
 	// Add paths to game pictures
 	gamePictures := map[string]string{
 		"Nova":            "assets/spets/games/nova.png",
@@ -59,6 +79,10 @@ func main() {
 					// Special signal indicating game is loaded
 					fmt.Println("Main: Received game loaded signal")
 					server.OnGameLoaded()
+				} else if signal == -2 {
+					// Signal to prepare for timeout (10 seconds remaining)
+					fmt.Println("Main: Received prepare timeout signal (-2)")
+					server.PrepareTimeout()
 				}
 			default:
 				// No signal, continue
