@@ -108,8 +108,8 @@ func (s *Server) launchBrowserFullscreen(url string) {
 
 	switch runtime.GOOS {
 	case "linux":
-		if _, err := exec.LookPath("google-chrome"); err == nil {
-			cmd = exec.Command("google-chrome",
+		if _, err := exec.LookPath("chromium-browser"); err == nil {
+			cmd = exec.Command("chromium-browser",
 //				"--kiosk", // window invisible on rpi
 				"--new-window",
 				"--window-position=0,0",
