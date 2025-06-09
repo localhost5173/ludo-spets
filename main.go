@@ -12,28 +12,28 @@ func main() {
 	// 1) Prepare your game‐core map
 	// ==============================
 	games := map[string]string{
-		"Nova":            "/home/simon/Dev/ludo-spets/games/nova.nes",
-		"Super Adventure": "/home/simon/Dev/ludo-spets/games/nova.nes",
-		"Pixel Quest":     "/home/simon/Dev/ludo-spets/games/nova.nes",
-		"Retro Hero":      "/home/simon/Dev/ludo-spets/games/nova.nes",
-		"Classic Journey": "/home/simon/Dev/ludo-spets/games/nova.nes",
+		"Nova":            "games/nova.nes",
+		"Super Adventure": "games/nova.nes",
+		"Pixel Quest":     "games/nova.nes",
+		"Retro Hero":      "games/nova.nes",
+		"Classic Journey": "games/nova.nes",
 		// Add more games here
 	}
 	cores := map[string]string{
-		"Nova":            "/home/simon/Dev/ludo-spets/cores/nestopia_libretro.so",
-		"Super Adventure": "/home/simon/Dev/ludo-spets/cores/nestopia_libretro.so",
-		"Pixel Quest":     "/home/simon/Dev/ludo-spets/cores/nestopia_libretro.so",
-		"Retro Hero":      "/home/simon/Dev/ludo-spets/cores/nestopia_libretro.so",
-		"Classic Journey": "/home/simon/Dev/ludo-spets/cores/nestopia_libretro.so",
+		"Nova":            "cores/nestopia_libretro.so",
+		"Super Adventure": "cores/nestopia_libretro.so",
+		"Pixel Quest":     "cores/nestopia_libretro.so",
+		"Retro Hero":      "cores/nestopia_libretro.so",
+		"Classic Journey": "cores/nestopia_libretro.so",
 		// Add corresponding cores here
 	}
 	// Add paths to game pictures
 	gamePictures := map[string]string{
-		"Nova":            "/home/simon/Dev/ludo-spets/assets/spets/games/nova.png",
-		"Super Adventure": "/home/simon/Dev/ludo-spets/assets/spets/games/mario.png",
-		"Pixel Quest":     "/home/simon/Dev/ludo-spets/assets/spets/games/nova.png",
-		"Retro Hero":      "/home/simon/Dev/ludo-spets/assets/spets/games/nova.png",
-		"Classic Journey": "/home/simon/Dev/ludo-spets/assets/spets/games/nova.png",
+		"Nova":            "assets/spets/games/nova.png",
+		"Super Adventure": "assets/spets/games/mario.png",
+		"Pixel Quest":     "assets/spets/games/nova.png",
+		"Retro Hero":      "assets/spets/games/nova.png",
+		"Classic Journey": "assets/spets/games/nova.png",
 		// Add corresponding picture paths here
 	}
 

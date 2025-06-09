@@ -5,7 +5,6 @@ package video
 
 import (
 	"log"
-	"path/filepath"
 	"unsafe"
 
 	"github.com/go-gl/gl/v2.1/gl"
@@ -121,7 +120,7 @@ func (video *Video) Configure(fullscreen bool) {
 	fbw, fbh := video.Window.GetFramebufferSize()
 
 	// LoadFont (fontfile, font scale, window width, window height)
-	fontPath := filepath.Join(settings.Current.AssetsDirectory, "font.ttf")
+	fontPath := "assets-static/font.ttf"
 	video.Font, err = LoadFont(fontPath, int32(36*2), fbw, fbh)
 	if err != nil {
 		panic(err)

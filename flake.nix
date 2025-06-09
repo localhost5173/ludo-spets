@@ -1,5 +1,5 @@
 {
-  description = "Dev environment for Ludo game in Go with OpenGL";
+  description = "Dev environment for custom arcade machine software using Ludo";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
