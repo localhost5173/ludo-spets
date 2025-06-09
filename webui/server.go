@@ -110,12 +110,12 @@ func (s *Server) launchBrowserFullscreen(url string) {
 	case "linux":
 		if _, err := exec.LookPath("google-chrome"); err == nil {
 			cmd = exec.Command("google-chrome",
-				"--kiosk",
+//				"--kiosk", // window invisible on rpi
 				"--new-window",
 				"--window-position=0,0",
 				"--display=:0.0",
 				"--start-maximized",
-				"--start-fullscreen",
+//				"--start-fullscreen", // window invisible on rpi
 				"--no-first-run",
 				"--app="+url)
 		} else if _, err := exec.LookPath("chromium-browser"); err == nil {
