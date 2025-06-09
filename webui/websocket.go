@@ -232,9 +232,9 @@ func (c *Client) handleMessage(msg Message) {
 			// Wait a bit more to ensure signals are processed
 			time.Sleep(200 * time.Millisecond)
 
-			// IMPORTANT: Do NOT close the browser - just minimize it
-			log.Printf("Minimizing browser window...")
-			c.hub.server.minimizeBrowser()
+			// Use wmctrl to maximize the game window
+			log.Printf("Maximizing game window using wmctrl...")
+			c.hub.server.maximizeGame()
 
 			// Set state to GameActive as the game should be running
 			log.Printf("Setting state to GameActive")
@@ -247,7 +247,6 @@ func (c *Client) handleMessage(msg Message) {
 		// Handle player choosing to quit the game
 		if c.hub.server.GetState() == StateExtendTime {
 			log.Println("Player chose to quit game")
-			// IMPORTANT: Do NOT close the browser
 			// Just go back to game selection state
 			c.hub.server.SetState(StateSelectGame)
 		}

@@ -23,6 +23,7 @@
           pkgs.xorg.libXxf86vm
           pkgs.openal
           pkgs.chromium
+          pkgs.wmctrl
         ];
 
         shellHook = ''
