@@ -38,6 +38,24 @@ type timerOverlay struct {
 
 var globalTimerOverlay = &timerOverlay{}
 
+// Track GLFW initialization status
+var glfwInitialized = false
+var glfwMutex sync.RWMutex
+
+// setGLFWInitialized sets the GLFW initialization status
+func setGLFWInitialized(initialized bool) {
+	glfwMutex.Lock()
+	defer glfwMutex.Unlock()
+	glfwInitialized = initialized
+}
+
+// isGLFWInitialized checks if GLFW is initialized
+func isGLFWInitialized() bool {
+	glfwMutex.RLock()
+	defer glfwMutex.RUnlock()
+	return glfwInitialized
+}
+
 // drawTimerOverlay draws the timer in the top-right corner, small, always visible, transparent background.
 func drawTimerOverlay(vid *video.Video) {
 	globalTimerOverlay.mu.RLock()
@@ -98,7 +116,7 @@ func runLoop(vid *video.Video, m *menu.Menu) {
 			frame++
 			if frame%600 == 0 {
 				savefiles.SaveSRAM()
-				}
+			}
 			// Draw timer overlay on top of game
 			drawTimerOverlay(vid)
 		} else {
@@ -141,7 +159,11 @@ func RunGame(corePath, gamePath string, durationSeconds int, timerChan chan int,
 	if err := glfw.Init(); err != nil {
 		return fmt.Errorf("failed to initialize glfw: %w", err)
 	}
-	defer glfw.Terminate()
+	setGLFWInitialized(true)
+	defer func() {
+		glfw.Terminate()
+		setGLFWInitialized(false)
+	}()
 
 	state.DB, err = scanner.LoadDB(settings.Current.DatabaseDirectory)
 	if err != nil {
@@ -153,11 +175,13 @@ func RunGame(corePath, gamePath string, durationSeconds int, timerChan chan int,
 
 	// Force window to be visible and focused
 	vid := video.Init(true) // Force fullscreen to ensure visibility
-	
+
 	// Ensure window is shown and focused
-	vid.Window.Show()
-	vid.Window.Focus()
-	
+	if vid != nil && vid.Window != nil {
+		vid.Window.Show()
+		vid.Window.Focus()
+	}
+
 	// Initialize audio after video to ensure proper context
 	audio.Init()
 	m := menu.Init(vid)
@@ -168,12 +192,12 @@ func RunGame(corePath, gamePath string, durationSeconds int, timerChan chan int,
 	if err := core.Load(corePath); err != nil {
 		return fmt.Errorf("failed to load core: %w", err)
 	}
-	
+
 	if err := core.LoadGame(gamePath); err != nil {
 		ntf.DisplayAndLog(ntf.Error, "Menu", err.Error())
 		return fmt.Errorf("failed to load game: %w", err)
 	}
-	
+
 	// Start the game immediately - don't go to quick menu
 	state.MenuActive = false
 	state.CoreRunning = true
@@ -186,101 +210,147 @@ func RunGame(corePath, gamePath string, durationSeconds int, timerChan chan int,
 
 	// Wait a moment for everything to initialize properly
 	time.Sleep(200 * time.Millisecond)
-	
+
 	// Force window to front and ensure it's visible
-	vid.Window.Show()
-	vid.Window.Focus()
-	
+	if vid != nil && vid.Window != nil {
+		vid.Window.Show()
+		vid.Window.Focus()
+	}
+
 	// Signal that the game is loaded and ready
 	log.Println("Game fully loaded, sending confirmation signal")
 	timerChan <- -999 // Special signal for game loaded
 
-	// Create a done channel to signal when timer goroutine should exit
+	// Create channels for timer management
 	doneChan := make(chan struct{})
-	
+	gameExitedChan := make(chan struct{})
+
 	// Timer management goroutine with cancellation support
 	go func() {
 		remaining := durationSeconds
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
 		prepareTimeoutSent := false
-		
+		gamePaused := false
+
 		for {
 			select {
 			case <-doneChan:
 				// Exit the goroutine when signaled
 				return
-				
+
+			case <-gameExitedChan:
+				// Game window has been closed, exit the timer goroutine
+				log.Println("Timer goroutine: received game exited signal, stopping timer")
+				return
+
 			case <-ticker.C:
+				if gamePaused {
+					// If game is paused, don't count down
+					continue
+				}
+
 				remaining--
 				globalTimerOverlay.mu.Lock()
 				globalTimerOverlay.remaining = remaining
 				globalTimerOverlay.mu.Unlock()
-				
+
 				// Send prepare timeout signal 10 seconds before actual timeout
 				if remaining == 10 && !prepareTimeoutSent {
 					log.Println("Sending prepare timeout signal (10 seconds remaining)")
 					timerChan <- -2 // -2 is the prepare timeout signal
 					prepareTimeoutSent = true
 				}
-				
+
 				if remaining <= 0 {
-					 // When time runs out, send game window information along with timeout signal
-					// This will allow the web UI to position itself over the game window
-					
-					// Get window position and size
+					// Check if GLFW is still initialized before accessing window
+					if !isGLFWInitialized() {
+						log.Println("Timer goroutine: GLFW terminated, exiting timer")
+						return
+					}
+
+					// Get window position and size (safely)
 					var xpos, ypos, width, height int
-					xpos, ypos = vid.Window.GetPos()
-					width, height = vid.Window.GetSize()
-					
+					if vid != nil && vid.Window != nil {
+						xpos, ypos = vid.Window.GetPos()
+						width, height = vid.Window.GetSize()
+					}
+
 					log.Printf("Game timeout! Pausing game at window position: %d,%d %dx%d", xpos, ypos, width, height)
-					
+
 					// Signal timeout to UI with window information
 					timerChan <- -1 // -1 is the timeout signal
-					
+
 					// Send window information through the same channel
-					// Pack window info as: x, y, width, height
 					timerChan <- xpos
 					timerChan <- ypos
 					timerChan <- width
 					timerChan <- height
-					
+
 					// Pause the game but keep window visible
 					state.MenuActive = true
+					gamePaused = true
 					log.Println("Game paused, waiting for resume signal...")
-					
-					// Wait for resume signal
-					resumeReceived := <-resumeChan
-					log.Printf("Resume signal received: %v", resumeReceived)
-					
-					// Get new duration
-					newDuration := <-timerChan
-					log.Printf("New timer duration received: %d seconds", newDuration)
-					
-					remaining = newDuration
-					prepareTimeoutSent = false // Reset for next cycle
-					
-					// Update overlay
-					globalTimerOverlay.mu.Lock()
-					globalTimerOverlay.remaining = remaining
-					globalTimerOverlay.mu.Unlock()
-					
-					// Resume game and ensure focus
-					log.Println("Resuming game...")
-					state.MenuActive = false
-					
-					// Force window focus
-					vid.Window.Show()
-					vid.Window.Focus()
-					
-					log.Printf("Game resumed with %d seconds remaining", remaining)
+
+					// Wait for resume signal with timeout
+					select {
+					case resumeReceived := <-resumeChan:
+						log.Printf("Resume signal received: %v", resumeReceived)
+
+						// Check if GLFW is still active before continuing
+						if !isGLFWInitialized() {
+							log.Println("Timer goroutine: GLFW terminated, cannot resume game")
+							return
+						}
+
+						// Get new duration with timeout
+						select {
+						case newDuration := <-timerChan:
+							log.Printf("New timer duration received: %d seconds", newDuration)
+							remaining = newDuration
+							prepareTimeoutSent = false // Reset for next cycle
+
+							// Update overlay
+							globalTimerOverlay.mu.Lock()
+							globalTimerOverlay.remaining = remaining
+							globalTimerOverlay.mu.Unlock()
+
+							// Resume game and ensure focus (safely)
+							log.Println("Resuming game...")
+							state.MenuActive = false
+							gamePaused = false
+
+							// Force window focus only if GLFW is still active
+							if isGLFWInitialized() && vid != nil && vid.Window != nil {
+								// Safely access window functions
+								vid.Window.Show()
+								vid.Window.Focus()
+							} else {
+								log.Println("Cannot focus window: GLFW not initialized")
+							}
+
+							log.Printf("Game resumed with %d seconds remaining", remaining)
+
+						case <-time.After(5 * time.Second):
+							log.Println("Timeout waiting for new duration, using default value")
+							remaining = 60 // Default to 60 seconds if no value received
+							gamePaused = false
+						}
+
+					case <-time.After(30 * time.Second):
+						log.Println("Timeout waiting for resume signal, exiting timer")
+						return
+
+					case <-doneChan:
+						return
+					}
 				}
-				
+
 			case newDuration := <-timerChan:
 				// Handle additional time being added (not during timeout)
 				if newDuration > 0 {
 					log.Printf("Timer updated: adding %d seconds", newDuration)
-					remaining += newDuration  // Add to existing time instead of replacing
+					remaining += newDuration // Add to existing time instead of replacing
 					globalTimerOverlay.mu.Lock()
 					globalTimerOverlay.remaining = remaining
 					globalTimerOverlay.mu.Unlock()
@@ -291,27 +361,46 @@ func RunGame(corePath, gamePath string, durationSeconds int, timerChan chan int,
 
 	// Add a small delay to ensure everything is initialized
 	time.Sleep(100 * time.Millisecond)
-	
-	// Force window to front again
-	vid.Window.Show()
-	vid.Window.Focus()
-	
+
+	// Force window to front again safely
+	if vid != nil && vid.Window != nil {
+		vid.Window.Show()
+		vid.Window.Focus()
+	}
+
 	log.Println("Starting game loop...")
-	
+
 	// Run the game loop with error handling
 	defer func() {
-		// Signal timer goroutine to exit
+		// Signal timer goroutine to exit first
 		close(doneChan)
-		
+
+		// Small delay to ensure timer goroutine has exited
+		time.Sleep(100 * time.Millisecond)
+
+		// Signal that the game has exited
+		close(gameExitedChan)
+
 		// Ensure core is unloaded properly
 		core.Unload()
-		
+
 		// Handle any panic
 		if r := recover(); r != nil {
 			log.Printf("Recovered from panic in game loop: %v", r)
 		}
 	}()
-	
-	runLoop(vid, m)
+
+	// Run the game loop in a protected way
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Recovered from panic in game loop: %v", r)
+				// Don't rethrow the panic, let the outer defer handle cleanup
+			}
+		}()
+
+		runLoop(vid, m)
+	}()
+
 	return nil
 }

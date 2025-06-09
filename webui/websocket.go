@@ -46,21 +46,21 @@ type Client struct {
 
 // Hub maintains the set of active clients and broadcasts messages
 type Hub struct {
-	server    *Server
-	clients   map[*Client]bool
-	broadcast chan []byte
-	register  chan *Client
+	server     *Server
+	clients    map[*Client]bool
+	broadcast  chan []byte
+	register   chan *Client
 	unregister chan *Client
 }
 
 // newHub creates a new Hub instance
 func newHub(server *Server) *Hub {
 	return &Hub{
-		server:    server,
-		broadcast: make(chan []byte),
-		register:  make(chan *Client),
+		server:     server,
+		broadcast:  make(chan []byte),
+		register:   make(chan *Client),
 		unregister: make(chan *Client),
-		clients:   make(map[*Client]bool),
+		clients:    make(map[*Client]bool),
 	}
 }
 
@@ -97,13 +97,13 @@ func (h *Hub) broadcastState() {
 		Type:    "state",
 		Payload: state,
 	}
-	
+
 	jsonMsg, err := json.Marshal(msg)
 	if err != nil {
 		log.Printf("Error marshaling state message: %v", err)
 		return
 	}
-	
+
 	h.broadcast <- jsonMsg
 }
 
@@ -114,13 +114,13 @@ func (h *Hub) sendStateToClient(client *Client) {
 		Type:    "state",
 		Payload: state,
 	}
-	
+
 	jsonMsg, err := json.Marshal(msg)
 	if err != nil {
 		log.Printf("Error marshaling state message: %v", err)
 		return
 	}
-	
+
 	client.send <- jsonMsg
 }
 
@@ -130,11 +130,11 @@ func (c *Client) readPump() {
 		c.hub.unregister <- c
 		c.conn.Close()
 	}()
-	
+
 	c.conn.SetReadLimit(maxMessageSize)
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
-	
+
 	for {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
@@ -143,13 +143,13 @@ func (c *Client) readPump() {
 			}
 			break
 		}
-		
+
 		var msg Message
 		if err := json.Unmarshal(message, &msg); err != nil {
 			log.Printf("Error unmarshaling message: %v", err)
 			continue
 		}
-		
+
 		c.handleMessage(msg)
 	}
 }
@@ -164,7 +164,7 @@ func (c *Client) handleMessage(msg Message) {
 				c.hub.server.SetState(StateTimeSelect)
 			}
 		}
-		
+
 	case "selectTime":
 		log.Printf("Received selectTime in state: %v", c.hub.server.GetState())
 		if c.hub.server.GetState() == StateTimeSelect {
@@ -178,24 +178,24 @@ func (c *Client) handleMessage(msg Message) {
 			time.Sleep(100 * time.Millisecond)
 			log.Printf("State after transition: %v", c.hub.server.GetState())
 		}
-		
+
 	case "payment":
 		log.Printf("Received payment message in state: %v", c.hub.server.GetState())
-		
+
 		// Parse payload regardless of state
 		paymentData := struct {
 			GameName string `json:"gameName"`
 			Minutes  int    `json:"minutes"`
 		}{}
-		
+
 		payloadBytes, _ := json.Marshal(msg.Payload)
 		if err := json.Unmarshal(payloadBytes, &paymentData); err != nil {
 			log.Printf("Error parsing payment data: %v", err)
 			return
 		}
-		
+
 		log.Printf("Payment data parsed: Game: %s, Minutes: %d", paymentData.GameName, paymentData.Minutes)
-		
+
 		// Expanded state handling for payment
 		currentState := c.hub.server.GetState()
 		if currentState == StatePayment {
@@ -205,34 +205,44 @@ func (c *Client) handleMessage(msg Message) {
 		} else if currentState == StateExtendPayment || currentState == StateExtendTime {
 			// Accept payment in either ExtendTime or ExtendPayment state
 			log.Printf("Processing time extension payment in state: %v", currentState)
-			
+
 			// Convert minutes to seconds (multiply by 2 for testing)
 			newDurationSecs := paymentData.Minutes * 2
-			
-			// Send signals in the correct order
+
+			// Send signals in the correct order with error handling
 			log.Printf("Sending resume signal...")
-			c.hub.server.resumeChan <- true
-			
+			select {
+			case c.hub.server.resumeChan <- true:
+				log.Println("Resume signal sent successfully")
+			case <-time.After(500 * time.Millisecond):
+				log.Println("Warning: Resume channel is full or blocked")
+			}
+
 			// Small delay to ensure resume signal is processed
-			time.Sleep(50 * time.Millisecond)
-			
-			log.Printf("Sending new timer duration: %d seconds", newDurationSecs)
-			c.hub.server.timerChan <- newDurationSecs
-			
-			// Wait a bit more to ensure signals are processed
 			time.Sleep(100 * time.Millisecond)
-			
-			 // IMPORTANT: Do NOT close the browser - just minimize it
+
+			log.Printf("Sending new timer duration: %d seconds", newDurationSecs)
+			select {
+			case c.hub.server.timerChan <- newDurationSecs:
+				log.Println("Timer duration sent successfully")
+			case <-time.After(500 * time.Millisecond):
+				log.Println("Warning: Timer channel is full or blocked")
+			}
+
+			// Wait a bit more to ensure signals are processed
+			time.Sleep(200 * time.Millisecond)
+
+			// IMPORTANT: Do NOT close the browser - just minimize it
 			log.Printf("Minimizing browser window...")
 			c.hub.server.minimizeBrowser()
-			
+
 			// Set state to GameActive as the game should be running
 			log.Printf("Setting state to GameActive")
 			c.hub.server.SetState(StateGameActive)
 		} else {
 			log.Printf("Ignoring payment message in unsupported state: %v", currentState)
 		}
-		
+
 	case "quit":
 		// Handle player choosing to quit the game
 		if c.hub.server.GetState() == StateExtendTime {
@@ -251,7 +261,7 @@ func (c *Client) writePump() {
 		ticker.Stop()
 		c.conn.Close()
 	}()
-	
+
 	for {
 		select {
 		case message, ok := <-c.send:
@@ -294,7 +304,7 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		log.Println(err)
 		return
 	}
-	
+
 	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256)}
 	client.hub.register <- client
 

@@ -304,7 +304,7 @@ func (s *Server) HandleTimeout() {
 	var x, y, width, height int
 
 	// Use select with short timeout to avoid blocking if values aren't available
-	timeout := time.After(100 * time.Millisecond)
+	timeout := time.After(200 * time.Millisecond) // Increased timeout
 
 	// Try to read X position
 	select {
@@ -372,10 +372,10 @@ func (s *Server) HandleTimeout() {
 // PrepareTimeout just ensures browser is ready (no closing/opening)
 func (s *Server) PrepareTimeout() {
 	log.Println("Preparing for timeout - ensuring browser is ready")
-	
+
 	// Just bring browser to foreground if it exists
 	s.forceBrowserToForeground()
-	
+
 	// Send a message to prepare the browser for timeout
 	msg := Message{
 		Type: "prepare_timeout",
@@ -383,7 +383,7 @@ func (s *Server) PrepareTimeout() {
 			"message": "Game will pause in 10 seconds",
 		},
 	}
-	
+
 	jsonMsg, _ := json.Marshal(msg)
 	s.hub.broadcast <- jsonMsg
 }
@@ -421,7 +421,30 @@ func (s *Server) forceBrowserToForeground() {
 			exec.Command("bash", "-c", "xdotool search --name 'Google Chrome' windowactivate").Run()
 			exec.Command("bash", "-c", "xdotool search --name 'SPETS ARCADE' windowactivate").Run()
 		}
-	// ...existing code for other platforms...
+	case "darwin":
+		// macOS specific code to bring browser to foreground
+		exec.Command("osascript", "-e", `tell application "Google Chrome" to activate`).Run()
+		exec.Command("osascript", "-e", `tell application "Firefox" to activate`).Run()
+	case "windows":
+		// Windows specific code to bring browser to foreground
+		exec.Command("powershell", "-Command", `
+			$chrome = Get-Process chrome -ErrorAction SilentlyContinue
+			if ($chrome) {
+				Add-Type @"
+				using System;
+				using System.Runtime.InteropServices;
+				public class Window {
+					[DllImport("user32.dll")]
+					[return: MarshalAs(UnmanagedType.Bool)]
+					public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+				}
+"@
+				$handle = $chrome.MainWindowHandle
+				if ($handle -ne [IntPtr]::Zero) {
+					[Window]::ShowWindow($handle, 5) # 5 = SW_SHOW
+				}
+			}
+		`).Run()
 	}
 }
 
